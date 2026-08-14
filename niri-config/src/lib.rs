@@ -2287,6 +2287,7 @@ mod tests {
                     open_on_output: Some(
                         "eDP-1",
                     ),
+                    hidden: None,
                     layout: None,
                 },
                 Workspace {
@@ -2294,6 +2295,7 @@ mod tests {
                         "workspace-2",
                     ),
                     open_on_output: None,
+                    hidden: None,
                     layout: None,
                 },
                 Workspace {
@@ -2301,6 +2303,7 @@ mod tests {
                         "workspace-3",
                     ),
                     open_on_output: None,
+                    hidden: None,
                     layout: None,
                 },
             ],
