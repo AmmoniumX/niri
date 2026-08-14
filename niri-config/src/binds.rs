@@ -328,6 +328,7 @@ pub enum Action {
     ExpandColumnToAvailableWidth,
     SwitchLayout(#[knuffel(argument, str)] LayoutSwitchTarget),
     ShowHotkeyOverlay,
+    ToggleWorkspaceVisibility(#[knuffel(argument, str)] String),
     MoveWorkspaceToMonitorLeft,
     MoveWorkspaceToMonitorRight,
     MoveWorkspaceToMonitorDown,
@@ -337,6 +338,9 @@ pub enum Action {
     ToggleWindowFloating,
     #[knuffel(skip)]
     ToggleWindowFloatingById(u64),
+    ToggleWindowSticky,
+    #[knuffel(skip)]
+    ToggleWindowStickyById(u64),
     MoveWindowToFloating,
     #[knuffel(skip)]
     MoveWindowToFloatingById(u64),
@@ -667,6 +671,10 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::ToggleWindowFloating { id: None } => Self::ToggleWindowFloating,
             niri_ipc::Action::ToggleWindowFloating { id: Some(id) } => {
                 Self::ToggleWindowFloatingById(id)
+            }
+            niri_ipc::Action::ToggleWindowSticky { id: None } => Self::ToggleWindowSticky,
+            niri_ipc::Action::ToggleWindowSticky { id: Some(id) } => {
+                Self::ToggleWindowStickyById(id)
             }
             niri_ipc::Action::MoveWindowToFloating { id: None } => Self::MoveWindowToFloating,
             niri_ipc::Action::MoveWindowToFloating { id: Some(id) } => {

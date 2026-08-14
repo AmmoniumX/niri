@@ -905,6 +905,8 @@ mod tests {
                 tab-indicator {
                     active-color "#f00"
                 }
+
+                float-above-fullscreen true
             }
 
             layer-rule {
@@ -1734,6 +1736,7 @@ mod tests {
                             is_focused: None,
                             is_active_in_column: None,
                             is_floating: None,
+                            is_sticky: None,
                             is_window_cast_target: None,
                             is_urgent: None,
                             at_startup: None,
@@ -1753,6 +1756,7 @@ mod tests {
                             is_focused: None,
                             is_active_in_column: None,
                             is_floating: None,
+                            is_sticky: None,
                             is_window_cast_target: None,
                             is_urgent: None,
                             at_startup: None,
@@ -1768,6 +1772,7 @@ mod tests {
                             ),
                             is_active_in_column: None,
                             is_floating: None,
+                            is_sticky: None,
                             is_window_cast_target: None,
                             is_urgent: None,
                             at_startup: None,
@@ -1797,6 +1802,7 @@ mod tests {
                     open_floating: Some(
                         false,
                     ),
+                    open_sticky: None,
                     open_focused: Some(
                         true,
                     ),
@@ -1865,6 +1871,9 @@ mod tests {
                     geometry_corner_radius: None,
                     clip_to_geometry: None,
                     baba_is_float: None,
+                    float_above_fullscreen: Some(
+                        true,
+                    ),
                     block_out_from: None,
                     variable_refresh_rate: None,
                     default_column_display: Some(
@@ -2282,6 +2291,7 @@ mod tests {
                     open_on_output: Some(
                         "eDP-1",
                     ),
+                    hidden: None,
                     layout: None,
                 },
                 Workspace {
@@ -2289,6 +2299,7 @@ mod tests {
                         "workspace-2",
                     ),
                     open_on_output: None,
+                    hidden: None,
                     layout: None,
                 },
                 Workspace {
@@ -2296,6 +2307,7 @@ mod tests {
                         "workspace-3",
                     ),
                     open_on_output: None,
+                    hidden: None,
                     layout: None,
                 },
             ],

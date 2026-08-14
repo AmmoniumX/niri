@@ -231,6 +231,8 @@ impl LayoutElement for TestWindow {
 
     fn set_floating(&mut self, _floating: bool) {}
 
+    fn set_sticky(&mut self, _sticky: bool) {}
+
     fn sizing_mode(&self) -> SizingMode {
         self.0.sizing_mode.get()
     }
@@ -858,6 +860,7 @@ impl Op {
                 layout_config,
             } => {
                 layout.ensure_named_workspace(&WorkspaceConfig {
+                    hidden: None,
                     name: WorkspaceName(format!("ws{ws_name}")),
                     open_on_output: output_name.map(|name| format!("output{name}")),
                     layout: layout_config.map(|x| niri_config::WorkspaceLayoutPart(*x)),
@@ -912,7 +915,9 @@ impl Op {
                     None,
                     false,
                     is_floating,
+                    false,
                     ActivateWindow::default(),
+                    false,
                 );
             }
             Op::AddWindowNextTo {
@@ -981,7 +986,9 @@ impl Op {
                     None,
                     false,
                     is_floating,
+                    false,
                     ActivateWindow::default(),
+                    false,
                 );
             }
             Op::AddWindowToNamedWorkspace {
@@ -1055,7 +1062,9 @@ impl Op {
                     None,
                     false,
                     is_floating,
+                    false,
                     ActivateWindow::default(),
+                    false,
                 );
             }
             Op::CloseWindow(id) => {
@@ -1181,7 +1190,7 @@ impl Op {
             Op::CenterVisibleColumns => layout.center_visible_columns(),
             Op::FocusWorkspaceDown => layout.switch_workspace_down(),
             Op::FocusWorkspaceUp => layout.switch_workspace_up(),
-            Op::FocusWorkspace(idx) => layout.switch_workspace(idx),
+            Op::FocusWorkspace(idx) => layout.switch_workspace(idx, false),
             Op::FocusWorkspaceAutoBackAndForth(idx) => {
                 layout.switch_workspace_auto_back_and_forth(idx)
             }
@@ -1652,6 +1661,92 @@ fn check_ops_with_options(
     let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), options);
     check_ops_on_layout(&mut layout, ops);
     layout
+}
+
+fn scrolling_position_for_window(ws: &Workspace<TestWindow>, id: usize) -> Option<(usize, usize)> {
+    ws.scrolling()
+        .columns()
+        .enumerate()
+        .find_map(|(col_idx, col)| {
+            col.tiles().enumerate().find_map(|(tile_idx, (tile, _))| {
+                (*tile.window().id() == id).then_some((col_idx, tile_idx))
+            })
+        })
+}
+
+#[test]
+fn toggle_sticky_restores_tiling_window_to_column() {
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::ConsumeOrExpelWindowLeft { id: None },
+    ];
+
+    let mut layout = check_ops(ops);
+
+    let original_ws_id = layout.active_workspace().unwrap().id();
+    let original_pos =
+        scrolling_position_for_window(layout.active_workspace().unwrap(), 2).unwrap();
+
+    layout.toggle_window_sticky(Some(&2));
+    layout.verify_invariants();
+    assert!(layout.is_sticky_window(&2));
+
+    layout.toggle_window_sticky(Some(&2));
+    layout.verify_invariants();
+    assert!(!layout.is_sticky_window(&2));
+
+    let (ws_id, is_floating, pos) = match &layout.monitor_set {
+        MonitorSet::Normal { monitors, .. } => monitors
+            .iter()
+            .flat_map(|mon| mon.workspaces.iter())
+            .find_map(|ws| {
+                ws.has_window(&2).then(|| {
+                    (
+                        ws.id(),
+                        ws.is_floating(&2),
+                        scrolling_position_for_window(ws, 2),
+                    )
+                })
+            })
+            .unwrap(),
+        MonitorSet::NoOutputs { .. } => unreachable!(),
+    };
+
+    assert_eq!(ws_id, original_ws_id);
+    assert!(!is_floating);
+    assert_eq!(pos, Some(original_pos));
+}
+
+#[test]
+fn toggle_sticky_restores_window_to_original_workspace() {
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+    ];
+
+    let mut layout = check_ops(ops);
+    let original_ws_id = layout.active_workspace().unwrap().id();
+
+    layout.toggle_window_sticky(Some(&1));
+    layout.verify_invariants();
+    assert!(layout.is_sticky_window(&1));
+
+    layout.switch_workspace_down();
+    layout.verify_invariants();
+    assert_ne!(layout.active_workspace().unwrap().id(), original_ws_id);
+
+    layout.toggle_window_sticky(Some(&1));
+    layout.verify_invariants();
+    assert!(!layout.is_sticky_window(&1));
+    assert_eq!(layout.active_workspace().unwrap().id(), original_ws_id);
 }
 
 #[test]
