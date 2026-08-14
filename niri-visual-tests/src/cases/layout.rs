@@ -181,6 +181,7 @@ impl Layout {
             None,
             false,
             false,
+            false,
             ActivateWindow::default(),
             false,
         );
@@ -209,6 +210,7 @@ impl Layout {
             AddWindowTarget::NextTo(right_of.id()),
             width,
             None,
+            false,
             false,
             false,
             ActivateWindow::default(),

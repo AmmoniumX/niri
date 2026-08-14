@@ -1736,6 +1736,7 @@ mod tests {
                             is_focused: None,
                             is_active_in_column: None,
                             is_floating: None,
+                            is_sticky: None,
                             is_window_cast_target: None,
                             is_urgent: None,
                             at_startup: None,
@@ -1755,6 +1756,7 @@ mod tests {
                             is_focused: None,
                             is_active_in_column: None,
                             is_floating: None,
+                            is_sticky: None,
                             is_window_cast_target: None,
                             is_urgent: None,
                             at_startup: None,
@@ -1770,6 +1772,7 @@ mod tests {
                             ),
                             is_active_in_column: None,
                             is_floating: None,
+                            is_sticky: None,
                             is_window_cast_target: None,
                             is_urgent: None,
                             at_startup: None,
@@ -1799,6 +1802,7 @@ mod tests {
                     open_floating: Some(
                         false,
                     ),
+                    open_sticky: None,
                     open_focused: Some(
                         true,
                     ),

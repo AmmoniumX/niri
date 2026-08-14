@@ -70,6 +70,9 @@ pub struct ResolvedWindowRules {
     /// Whether the window should open floating.
     pub open_floating: Option<bool>,
 
+    /// Whether the window should open sticky.
+    pub open_sticky: Option<bool>,
+
     /// Whether the window should open focused.
     pub open_focused: Option<bool>,
 
@@ -177,6 +180,13 @@ impl<'a> WindowRef<'a> {
         }
     }
 
+    pub fn is_sticky(self) -> bool {
+        match self {
+            WindowRef::Unmapped(_) => false,
+            WindowRef::Mapped(mapped) => mapped.is_sticky(),
+        }
+    }
+
     pub fn is_window_cast_target(self) -> bool {
         match self {
             WindowRef::Unmapped(_) => false,
@@ -257,6 +267,10 @@ impl ResolvedWindowRules {
 
                 if let Some(x) = rule.open_floating {
                     resolved.open_floating = Some(x);
+                }
+
+                if let Some(x) = rule.open_sticky {
+                    resolved.open_sticky = Some(x);
                 }
 
                 if let Some(x) = rule.open_focused {
@@ -448,6 +462,12 @@ fn window_matches(window: WindowRef, role: &XdgToplevelSurfaceRoleAttributes, m:
 
     if let Some(is_floating) = m.is_floating {
         if window.is_floating() != is_floating {
+            return false;
+        }
+    }
+
+    if let Some(is_sticky) = m.is_sticky {
+        if window.is_sticky() != is_sticky {
             return false;
         }
     }
