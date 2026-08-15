@@ -1,3 +1,15 @@
+## Important
+
+Niri-QoL is a soft fork of the Niri Wayland compositor, intended to closely match the upstream with regards of new commits while also merging some currently unmerged feature PRs. Please do not report any issues when using this fork to the upstream Niri project, instead either report them here, or try to see if you can replicate the issue using the upstream niri version.
+
+Merged PRs:
+
+- [Hidden workspaces](https://github.com/niri-wm/niri/pull/2997)
+- [Add window-rule float-above-fullscreen](https://github.com/niri-wm/niri/pull/4062)
+- [Add open-sticky window rule for sticky floating windows across workspaces](https://github.com/niri-wm/niri/pull/3302)
+
+---
+
 <h1 align="center"><img alt="niri" src="https://github.com/user-attachments/assets/07d05cd0-d5dc-4a28-9a35-51bae8f119a0"></h1>
 <p align="center">A scrollable-tiling Wayland compositor.</p>
 <p align="center">
