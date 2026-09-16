@@ -14,8 +14,6 @@ use smithay::backend::allocator::format::FormatSet;
 #[cfg(feature = "xdp-gnome-screencast")]
 use smithay::backend::allocator::gbm::GbmDevice;
 use smithay::backend::allocator::Buffer;
-#[cfg(feature = "xdp-gnome-screencast")]
-use smithay::backend::drm::DrmDeviceFd;
 use smithay::backend::drm::DrmNode;
 use smithay::backend::egl::native::EGLSurfacelessDisplay;
 use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
@@ -52,7 +50,7 @@ pub struct Headless {
     ///
     /// This is required for PipeWire/portal screencasting (e.g. Discord/OBS PipeWire sources).
     #[cfg(feature = "xdp-gnome-screencast")]
-    gbm: Option<GbmDevice<DrmDeviceFd>>,
+    gbm: Option<GbmDevice<DeviceFd>>,
     ipc_outputs: Arc<Mutex<IpcOutputMap>>,
     /// Seat name used for both libinput udev enumeration (`udev_assign_seat`) and the compositor
     /// `wl_seat` name.
@@ -84,7 +82,7 @@ impl Headless {
     }
 
     #[cfg(feature = "xdp-gnome-screencast")]
-    pub fn gbm_device(&self) -> Option<GbmDevice<DrmDeviceFd>> {
+    pub fn gbm_device(&self) -> Option<GbmDevice<DeviceFd>> {
         self.gbm.clone()
     }
 
@@ -398,6 +396,10 @@ impl Headless {
         self.renderer.as_mut().map(f)
     }
 
+    pub fn primary_render_node(&mut self) -> Option<DrmNode> {
+        self.render_node
+    }
+
     pub fn render(&mut self, niri: &mut Niri, output: &Output) -> RenderResult {
         let now = get_monotonic_time();
 
@@ -527,7 +529,7 @@ impl Default for Headless {
 }
 
 #[cfg(feature = "xdp-gnome-screencast")]
-fn try_init_headless_gbm_device(render_node: DrmNode) -> anyhow::Result<GbmDevice<DrmDeviceFd>> {
+fn try_init_headless_gbm_device(render_node: DrmNode) -> anyhow::Result<GbmDevice<DeviceFd>> {
     use std::fs::OpenOptions;
     use std::os::fd::OwnedFd;
     use std::os::unix::fs::OpenOptionsExt;
@@ -544,7 +546,7 @@ fn try_init_headless_gbm_device(render_node: DrmNode) -> anyhow::Result<GbmDevic
         .with_context(|| format!("error opening render node at {path:?}"))?;
 
     let owned_fd = OwnedFd::from(file);
-    let device_fd = DrmDeviceFd::new(DeviceFd::from(owned_fd));
+    let device_fd = DeviceFd::from(owned_fd);
     let gbm = GbmDevice::new(device_fd).context("error creating GBM device")?;
     Ok(gbm)
 }

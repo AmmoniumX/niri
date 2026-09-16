@@ -12,4 +12,5 @@ mod remove_output;
 mod shaders;
 mod transactions;
 mod virtual_output;
+mod virtual_pointer;
 mod window_opening;

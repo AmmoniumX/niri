@@ -2532,6 +2532,7 @@ mod tests {
                     "/dev/dri/renderD130",
                 ],
                 force_pipewire_invalid_modifier: false,
+                disable_pipewire_dmabuf: false,
                 emulate_zero_presentation_time: false,
                 disable_resize_throttling: false,
                 disable_transactions: false,

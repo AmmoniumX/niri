@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use smithay::backend::input::ButtonState;
+use smithay::backend::input::{ButtonState, InputTime};
 use smithay::desktop::Window;
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent,
@@ -20,7 +20,6 @@ use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER};
 
 use crate::input::AnyStartData;
 use crate::niri::State;
-use crate::utils::get_monotonic_time;
 
 pub struct MoveGrab {
     start_data: AnyStartData<State>,
@@ -328,7 +327,7 @@ impl PointerGrab<State> for MoveGrab {
 
         // Relative motion takes precedence over normal motion.
         if self.relative_delta.is_none() {
-            self.event_timestamp = Some(Duration::from_millis(u64::from(event.time)));
+            self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
         }
     }
 
@@ -343,7 +342,7 @@ impl PointerGrab<State> for MoveGrab {
         handle.relative_motion(data, None, event);
 
         *self.relative_delta.get_or_insert_default() += event.delta;
-        self.event_timestamp = Some(Duration::from_micros(event.utime));
+        self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 
     fn button(
@@ -395,7 +394,7 @@ impl PointerGrab<State> for MoveGrab {
                 self,
                 data,
                 SERIAL_COUNTER.next_serial(),
-                get_monotonic_time().as_millis() as u32,
+                InputTime::now(),
                 true,
             );
         }
@@ -528,7 +527,7 @@ impl TouchGrab<State> for MoveGrab {
         }
 
         self.new_location = event.location;
-        self.event_timestamp = Some(Duration::from_millis(u64::from(event.time)));
+        self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 
     fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
@@ -597,7 +596,7 @@ impl TabletToolGrab<State> for MoveGrab {
         handle.motion(data, None, event);
 
         self.new_location = event.location;
-        self.event_timestamp = Some(Duration::from_millis(u64::from(event.time)));
+        self.event_timestamp = Some(Duration::from_micros(event.time.micros()));
     }
 
     fn down(
@@ -641,7 +640,7 @@ impl TabletToolGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut TabletToolInnerHandle<'_, State>,
-        time: u32,
+        time: InputTime,
     ) {
         handle.frame(data, time);
 
@@ -651,7 +650,7 @@ impl TabletToolGrab<State> for MoveGrab {
                 self,
                 data,
                 SERIAL_COUNTER.next_serial(),
-                get_monotonic_time().as_millis() as u32,
+                InputTime::now(),
                 true,
             );
         }

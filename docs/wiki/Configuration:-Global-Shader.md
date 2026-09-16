@@ -723,7 +723,7 @@ To opt in, add the bare `shaders-in-capture` flag at the top level of your confi
 shaders-in-capture
 ```
 
-When the flag is present, the global shader, all region shaders, and all per-window shaders appear in portal screencast and screencopy captures (`grim`, `wl-screenrec`). The live display is unaffected either way.
+When the flag is present, the global shader, all region shaders, and all per-window shaders appear in portal screencast, screencopy, and ext-image-copy-capture captures (`grim`, `wl-screenrec`, `wayvnc`, `wl-mirror`). The live display is unaffected either way.
 
 **KMS capture is always independent of this flag.** Direct KMS capture tools such as `gpu-screen-recorder -w <connector>` read the raw scanout buffer after all post-processing has been applied, so they always show shader output regardless of whether `shaders-in-capture` is set.
 
