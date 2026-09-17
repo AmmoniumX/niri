@@ -134,7 +134,7 @@ input {
 #### Per-Keyboard Configuration
 
 You can give a `keyboard` block a device name argument to configure just that keyboard, e.g. to use a different layout on an external keyboard than on your laptop's built-in one.
-Run `niri msg keyboard-layouts` or `libinput list-devices` to find a device's exact name.
+To find a device's exact name, run `libinput list-devices` (needs root) or read the `Name=` lines of `/proc/bus/input/devices`.
 
 ```kdl
 input {

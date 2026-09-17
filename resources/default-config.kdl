@@ -26,8 +26,8 @@ input {
     }
 
     // You can give a keyboard block a device name to configure just that keyboard, e.g. to set
-    // a different layout on an external keyboard than on your laptop's built-in one. Run
-    // `niri msg keyboard-layouts` or check `libinput list-devices` to find the exact device name.
+    // a different layout on an external keyboard than on your laptop's built-in one. Check
+    // `libinput list-devices` or /proc/bus/input/devices to find the exact device name.
     // A named keyboard block only overrides settings it sets; anything left unset falls back to
     // the unnamed keyboard block above.
     //
