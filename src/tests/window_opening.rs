@@ -972,3 +972,34 @@ window-rule {
         "child followed its parent onto hidden workspace {child_ws:?}"
     );
 }
+
+#[test]
+fn vertical_layout_configures_physical_size_and_bounds() {
+    let config = Config::parse_mem(
+        r#"
+        output "headless-1" {
+            layout {
+                main-axis "vertical"
+                struts { left 31; right 73; top 19; bottom 47; }
+            }
+        }
+    "#,
+    )
+    .unwrap();
+    let mut f = Fixture::with_config(config);
+    f.add_output(1, (1080, 1920));
+    let id = f.add_client();
+    let window = f.client(id).create_window();
+    let surface = window.surface.clone();
+    window.commit();
+    f.roundtrip(id);
+    let window = f.client(id).window(&surface);
+    assert_eq!(window.pending_configure.size, (944, 903));
+    assert_eq!(window.pending_configure.bounds, Some((944, 1822)));
+    window.attach_new_buffer();
+    window.ack_last_and_commit();
+    f.double_roundtrip(id);
+    let window = f.client(id).window(&surface);
+    assert_eq!(window.pending_configure.size, (944, 903));
+    assert_eq!(window.pending_configure.bounds, Some((944, 1822)));
+}
