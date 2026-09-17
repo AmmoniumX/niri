@@ -56,7 +56,9 @@ pub use crate::debug::Debug;
 pub use crate::error::{ConfigIncludeError, ConfigParseResult};
 pub use crate::gestures::Gestures;
 pub use crate::global_shader::{GlobalShader, GlobalShaderCaps, GlobalShaderPart, RedrawMode};
-pub use crate::input::{Input, ModKey, ScrollMethod, TrackLayout, WarpMouseToFocusMode, Xkb};
+pub use crate::input::{
+    Input, Keyboard, ModKey, ScrollMethod, TrackLayout, WarpMouseToFocusMode, Xkb,
+};
 pub use crate::layer_rule::LayerRule;
 pub use crate::layout::*;
 pub use crate::misc::*;
@@ -694,8 +696,8 @@ mod tests {
     #[test]
     fn default_repeat_params() {
         let config = Config::parse_mem("").unwrap();
-        assert_eq!(config.input.keyboard.repeat_delay, 600);
-        assert_eq!(config.input.keyboard.repeat_rate, 25);
+        assert_eq!(config.input.fallback_keyboard().repeat_delay, 600);
+        assert_eq!(config.input.fallback_keyboard().repeat_rate, 25);
     }
 
     #[track_caller]
@@ -1161,22 +1163,25 @@ mod tests {
         assert_debug_snapshot!(parsed, @r#"
         Config {
             input: Input {
-                keyboard: Keyboard {
-                    xkb: Xkb {
-                        rules: "",
-                        model: "",
-                        layout: "us,ru",
-                        variant: "",
-                        options: Some(
-                            "grp:win_space_toggle",
-                        ),
-                        file: None,
+                keyboards: [
+                    Keyboard {
+                        name: None,
+                        xkb: Xkb {
+                            rules: "",
+                            model: "",
+                            layout: "us,ru",
+                            variant: "",
+                            options: Some(
+                                "grp:win_space_toggle",
+                            ),
+                            file: None,
+                        },
+                        repeat_delay: 600,
+                        repeat_rate: 25,
+                        track_layout: Window,
+                        numlock: false,
                     },
-                    repeat_delay: 600,
-                    repeat_rate: 25,
-                    track_layout: Window,
-                    numlock: false,
-                },
+                ],
                 touchpad: Touchpad {
                     off: false,
                     tap: true,
@@ -2732,8 +2737,24 @@ mod tests {
                 &format!("{default_config:#?}")
             ),
             @r#"
-        -            numlock: false,
-        +            numlock: true,
+        -        keyboards: [],
+        +        keyboards: [
+        +            Keyboard {
+        +                name: None,
+        +                xkb: Xkb {
+        +                    rules: "",
+        +                    model: "",
+        +                    layout: "",
+        +                    variant: "",
+        +                    options: None,
+        +                    file: None,
+        +                },
+        +                repeat_delay: 600,
+        +                repeat_rate: 25,
+        +                track_layout: Global,
+        +                numlock: true,
+        +            },
+        +        ],
 
         -            tap: false,
         +            tap: true,
@@ -2835,5 +2856,182 @@ mod tests {
         let cc = cfg.overview.consolidated_carousel.unwrap();
         assert_eq!(cc.reveal_zoom, 0.48);
         assert_eq!(cc.assembled_zoom, 0.22);
+    }
+
+    #[test]
+    fn named_keyboard_inherits_unset_fields_from_unnamed_block() {
+        let config = do_parse(
+            r#"
+            input {
+                keyboard {
+                    xkb {
+                        layout "gb"
+                    }
+                    repeat-rate 40
+                    numlock
+                }
+                keyboard "Topre Realforce 87U" {
+                    xkb {
+                        layout "us"
+                    }
+                }
+            }
+            "#,
+        );
+
+        assert_eq!(config.input.keyboards.len(), 2);
+
+        let fallback = config.input.fallback_keyboard();
+        assert_eq!(fallback.name, None);
+        assert_eq!(fallback.xkb.layout, "gb");
+
+        let realforce = config.input.keyboard_named("Topre Realforce 87U");
+        assert_eq!(realforce.name.as_deref(), Some("Topre Realforce 87U"));
+        assert_eq!(realforce.xkb.layout, "us");
+        // Fields the named block leaves unset come from the unnamed block,
+        // not from the bare defaults.
+        assert_eq!(realforce.repeat_rate, 40);
+        assert!(realforce.numlock);
+    }
+
+    #[test]
+    fn named_keyboard_xkb_block_replaces_the_unnamed_one_wholesale() {
+        let config = do_parse(
+            r#"
+            input {
+                keyboard {
+                    xkb {
+                        layout "gb"
+                        options "caps:escape"
+                    }
+                }
+                keyboard "Ext" {
+                    xkb {
+                        layout "us"
+                    }
+                }
+            }
+            "#,
+        );
+
+        // `xkb` is a single setting: a named block that sets it does not
+        // inherit individual xkb fields such as `options` from the unnamed block.
+        let ext = config.input.keyboard_named("Ext");
+        assert_eq!(ext.xkb.layout, "us");
+        assert_eq!(ext.xkb.options, None);
+    }
+
+    #[test]
+    fn keyboard_named_matches_device_names_case_insensitively() {
+        let config = do_parse(
+            r#"
+            input {
+                keyboard "Topre Realforce 87U" {
+                    xkb {
+                        layout "us"
+                    }
+                }
+            }
+            "#,
+        );
+
+        let found = config.input.keyboard_named("topre REALFORCE 87u");
+        assert_eq!(found.name.as_deref(), Some("Topre Realforce 87U"));
+        assert_eq!(found.xkb.layout, "us");
+    }
+
+    #[test]
+    fn keyboard_named_falls_back_to_unnamed_block_for_unknown_devices() {
+        let config = do_parse(
+            r#"
+            input {
+                keyboard {
+                    xkb {
+                        layout "gb"
+                    }
+                }
+                keyboard "Ext" {
+                    xkb {
+                        layout "us"
+                    }
+                }
+            }
+            "#,
+        );
+
+        let unknown = config.input.keyboard_named("AT Translated Set 2 keyboard");
+        assert_eq!(unknown, config.input.fallback_keyboard());
+        assert_eq!(unknown.xkb.layout, "gb");
+    }
+
+    #[test]
+    fn named_keyboard_without_unnamed_sibling_falls_back_to_defaults() {
+        let config = do_parse(
+            r#"
+            input {
+                keyboard "Ext" {
+                    xkb {
+                        layout "us"
+                    }
+                }
+            }
+            "#,
+        );
+
+        let fallback = config.input.fallback_keyboard();
+        assert_eq!(fallback, crate::input::Keyboard::default());
+
+        let ext = config.input.keyboard_named("Ext");
+        assert_eq!(ext.xkb.layout, "us");
+        assert_eq!(ext.repeat_delay, 600);
+        assert_eq!(ext.repeat_rate, 25);
+    }
+
+    #[test]
+    fn included_input_section_replaces_all_keyboard_blocks() {
+        // Duplicate top-level `input` nodes are rejected within one file, so a
+        // second `input` section can only come from an included file.
+        let dir =
+            std::env::temp_dir().join(format!("niri-config-keyboards-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("keyboards.kdl"),
+            r#"
+            input {
+                keyboard "Other" {
+                    xkb {
+                        layout "de"
+                    }
+                }
+            }
+            "#,
+        )
+        .unwrap();
+
+        let text = r#"
+            input {
+                keyboard {
+                    xkb {
+                        layout "gb"
+                    }
+                }
+                keyboard "Ext" {
+                    xkb {
+                        layout "us"
+                    }
+                }
+            }
+            include "keyboards.kdl"
+            "#;
+        let parsed = Config::parse(&dir.join("config.kdl"), text).config;
+        std::fs::remove_dir_all(&dir).unwrap();
+        let config = parsed.map_err(miette::Report::new).unwrap();
+
+        // The included section's keyboard blocks replace the earlier ones
+        // entirely, the same way `touchpad {}` and friends behave.
+        assert_eq!(config.input.keyboards.len(), 1);
+        assert_eq!(config.input.keyboard_named("Other").xkb.layout, "de");
+        assert_eq!(config.input.keyboard_named("Ext").xkb.layout, "");
+        assert_eq!(config.input.fallback_keyboard().xkb.layout, "");
     }
 }

@@ -7,6 +7,7 @@ mod server;
 mod animations;
 mod floating;
 mod fullscreen;
+mod keyboard_config;
 mod layer_shell;
 mod remove_output;
 mod shaders;
