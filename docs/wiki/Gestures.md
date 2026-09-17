@@ -38,27 +38,31 @@ If you double-click on a left or right tiled window resize edge, the column will
 
 This works with both window-initiated resizes (when using client-side decorations), and niri-initiated <kbd>Mod</kbd> + right click resizes.
 
-#### Horizontal View Movement
+#### View Movement
 
 <sup>Since: 0.1.6</sup>
 
-Move the view horizontally by holding <kbd>Mod</kbd> and the middle mouse button (or the wheel) and dragging the mouse horizontally.
+Move the view by holding <kbd>Mod</kbd> and the middle mouse button (or the wheel) and dragging along the tiling main axis.
+By default this is horizontal; with [`layout.main-axis "vertical"`](./Configuration:-Layout.md#main-axis), this becomes vertical.
 
 #### Workspace Switch
 
 <sup>Since: 0.1.7</sup>
 
-Switch workspaces by holding <kbd>Mod</kbd> and the middle mouse button (or the wheel) and dragging the mouse vertically.
+Switch workspaces by holding <kbd>Mod</kbd> and the middle mouse button (or the wheel) and dragging perpendicular to the tiling main axis.
+By default this is vertical; with [`layout.main-axis "vertical"`](./Configuration:-Layout.md#main-axis), this becomes horizontal.
 
 ### Touchpad
 
 #### Workspace Switch
 
-Switch workspaces with three-finger vertical swipes.
+Switch workspaces with three-finger swipes perpendicular to the tiling main axis.
+By default this is a vertical swipe; with [`layout.main-axis "vertical"`](./Configuration:-Layout.md#main-axis), this is horizontal.
 
-#### Horizontal View Movement
+#### View Movement
 
-Move the view horizontally with three-finger horizontal swipes.
+Move the view with three-finger swipes along the tiling main axis.
+By default this is horizontal; with [`layout.main-axis "vertical"`](./Configuration:-Layout.md#main-axis), this is vertical.
 
 #### Open and Close the Overview
 
@@ -105,7 +109,7 @@ Also works on a touchscreen.
 
 <sup>Since: 25.05</sup>
 
-Scroll the workspaces up/down when moving the mouse cursor against a monitor edge during drag-and-drop (DnD) while in the overview.
+Scroll the workspaces along the overview strip when moving the mouse cursor against the relevant monitor edge during drag-and-drop (DnD) while in the overview.
 Also works on a touchscreen.
 
 #### Drag-and-Drop Hold to Activate

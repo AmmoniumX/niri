@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use niri_config::utils::MergeWith as _;
 use niri_config::{
-    CenterFocusedColumn, CornerRadius, OutputName, PresetSize, Workspace as WorkspaceConfig,
+    CenterFocusedColumn, CornerRadius, MainAxis, OutputName, PresetSize,
+    Workspace as WorkspaceConfig,
 };
 use niri_ipc::{ColumnDisplay, PositionChange, SizeChange, WindowLayout};
 use smithay::backend::renderer::element::Kind;
@@ -17,6 +18,7 @@ use smithay::utils::{Logical, Point, Rectangle, Serial, Size, Transform};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
 
+use super::axis::{AxisDirection, AxisEdge, AxisMap};
 use super::floating::{FloatingSpace, FloatingSpaceRenderElement};
 use super::scrolling::{
     Column, ColumnWidth, ScrollDirection, ScrollingSpace, ScrollingSpaceRenderElement,
@@ -367,6 +369,14 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn id(&self) -> WorkspaceId {
         self.id
+    }
+
+    pub fn main_axis(&self) -> MainAxis {
+        self.options.layout.main_axis
+    }
+
+    pub(in crate::layout) fn axis(&self) -> AxisMap {
+        AxisMap::new(self.main_axis())
     }
 
     pub fn name(&self) -> Option<&String> {
@@ -909,6 +919,14 @@ impl<W: LayoutElement> Workspace<W> {
         // size. This is to ensure that a fixed-size window rule works on open, while still
         // allowing the window freedom to pick its default size otherwise.
         let (min_size, max_size) = rules.apply_min_max_size(min_size, max_size);
+        let axis = if is_floating {
+            AxisMap::default()
+        } else {
+            self.axis()
+        };
+        size = axis.size_in(size);
+        let min_size = axis.size_in(min_size);
+        let max_size = axis.size_in(max_size);
         size.w = ensure_min_max_size_maybe_zero(size.w, min_size.w, max_size.w);
         // For scrolling (where height is > 0) only ensure fixed height, since at runtime scrolling
         // will only honor fixed height currently.
@@ -919,7 +937,7 @@ impl<W: LayoutElement> Workspace<W> {
             size.h = max(size.h, min_size.h);
         }
 
-        size
+        axis.size_out(size)
     }
 
     pub fn configure_new_window(
@@ -964,7 +982,10 @@ impl<W: LayoutElement> Workspace<W> {
         window: &W,
         width: Option<PresetSize>,
     ) -> ColumnWidth {
-        let width = width.unwrap_or_else(|| PresetSize::Fixed(window.size().w));
+        let width = width.unwrap_or_else(|| {
+            let fixed = self.axis().size_main(window.size());
+            PresetSize::Fixed(fixed)
+        });
         match width {
             PresetSize::Fixed(fixed) => {
                 let mut fixed = f64::from(fixed);
@@ -982,9 +1003,28 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
+    pub fn focus_column_in_direction(&mut self, forward: bool) {
+        if self.floating_is_active.get() {
+            self.floating.focus_main(
+                self.axis(),
+                if forward {
+                    AxisDirection::Forward
+                } else {
+                    AxisDirection::Backward
+                },
+            );
+        } else if forward {
+            self.scrolling.focus_right();
+        } else {
+            self.scrolling.focus_left();
+        }
+    }
+
     pub fn focus_left(&mut self) -> bool {
         if self.floating_is_active.get() {
             self.floating.focus_left()
+        } else if self.axis().is_vertical() {
+            self.scrolling.focus_up()
         } else {
             self.scrolling.focus_left()
         }
@@ -993,6 +1033,8 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn focus_right(&mut self) -> bool {
         if self.floating_is_active.get() {
             self.floating.focus_right()
+        } else if self.axis().is_vertical() {
+            self.scrolling.focus_down()
         } else {
             self.scrolling.focus_right()
         }
@@ -1000,7 +1042,7 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn focus_column_first(&mut self) {
         if self.floating_is_active.get() {
-            self.floating.focus_leftmost();
+            self.floating.focus_main_edge(self.axis(), AxisEdge::Start);
         } else {
             self.scrolling.focus_column_first();
         }
@@ -1008,7 +1050,7 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn focus_column_last(&mut self) {
         if self.floating_is_active.get() {
-            self.floating.focus_rightmost();
+            self.floating.focus_main_edge(self.axis(), AxisEdge::End);
         } else {
             self.scrolling.focus_column_last();
         }
@@ -1016,13 +1058,25 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn focus_column_right_or_first(&mut self) {
         if !self.focus_right() {
-            self.focus_column_first();
+            if self.floating_is_active.get() {
+                self.floating.focus_leftmost();
+            } else if self.axis().is_vertical() {
+                self.scrolling.focus_top();
+            } else {
+                self.scrolling.focus_column_first();
+            }
         }
     }
 
     pub fn focus_column_left_or_last(&mut self) {
         if !self.focus_left() {
-            self.focus_column_last();
+            if self.floating_is_active.get() {
+                self.floating.focus_rightmost();
+            } else if self.axis().is_vertical() {
+                self.scrolling.focus_bottom();
+            } else {
+                self.scrolling.focus_column_last();
+            }
         }
     }
 
@@ -1043,6 +1097,8 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn focus_down(&mut self) -> bool {
         if self.floating_is_active.get() {
             self.floating.focus_down()
+        } else if self.axis().is_vertical() {
+            self.scrolling.focus_right()
         } else {
             self.scrolling.focus_down()
         }
@@ -1051,46 +1107,42 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn focus_up(&mut self) -> bool {
         if self.floating_is_active.get() {
             self.floating.focus_up()
+        } else if self.axis().is_vertical() {
+            self.scrolling.focus_left()
         } else {
             self.scrolling.focus_up()
         }
     }
 
     pub fn focus_down_or_left(&mut self) {
-        if self.floating_is_active.get() {
-            self.floating.focus_down();
-        } else {
-            self.scrolling.focus_down_or_left();
+        if !self.focus_down() && !self.floating_is_active.get() {
+            self.focus_left();
         }
     }
 
     pub fn focus_down_or_right(&mut self) {
-        if self.floating_is_active.get() {
-            self.floating.focus_down();
-        } else {
-            self.scrolling.focus_down_or_right();
+        if !self.focus_down() && !self.floating_is_active.get() {
+            self.focus_right();
         }
     }
 
     pub fn focus_up_or_left(&mut self) {
-        if self.floating_is_active.get() {
-            self.floating.focus_up();
-        } else {
-            self.scrolling.focus_up_or_left();
+        if !self.focus_up() && !self.floating_is_active.get() {
+            self.focus_left();
         }
     }
 
     pub fn focus_up_or_right(&mut self) {
-        if self.floating_is_active.get() {
-            self.floating.focus_up();
-        } else {
-            self.scrolling.focus_up_or_right();
+        if !self.focus_up() && !self.floating_is_active.get() {
+            self.focus_right();
         }
     }
 
     pub fn focus_window_top(&mut self) {
         if self.floating_is_active.get() {
             self.floating.focus_topmost();
+        } else if self.axis().is_vertical() {
+            self.scrolling.focus_column_first();
         } else {
             self.scrolling.focus_top();
         }
@@ -1099,6 +1151,8 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn focus_window_bottom(&mut self) {
         if self.floating_is_active.get() {
             self.floating.focus_bottommost();
+        } else if self.axis().is_vertical() {
+            self.scrolling.focus_column_last();
         } else {
             self.scrolling.focus_bottom();
         }
@@ -1120,6 +1174,8 @@ impl<W: LayoutElement> Workspace<W> {
         if self.floating_is_active.get() {
             self.floating.move_left();
             true
+        } else if self.axis().is_vertical() {
+            self.scrolling.move_up()
         } else {
             self.scrolling.move_left()
         }
@@ -1129,6 +1185,8 @@ impl<W: LayoutElement> Workspace<W> {
         if self.floating_is_active.get() {
             self.floating.move_right();
             true
+        } else if self.axis().is_vertical() {
+            self.scrolling.move_down()
         } else {
             self.scrolling.move_right()
         }
@@ -1159,6 +1217,8 @@ impl<W: LayoutElement> Workspace<W> {
         if self.floating_is_active.get() {
             self.floating.move_down();
             true
+        } else if self.axis().is_vertical() {
+            self.scrolling.move_right()
         } else {
             self.scrolling.move_down()
         }
@@ -1168,6 +1228,8 @@ impl<W: LayoutElement> Workspace<W> {
         if self.floating_is_active.get() {
             self.floating.move_up();
             true
+        } else if self.axis().is_vertical() {
+            self.scrolling.move_left()
         } else {
             self.scrolling.move_up()
         }
@@ -1253,7 +1315,7 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn toggle_width(&mut self, forwards: bool) {
         if self.floating_is_active.get() {
-            self.floating.toggle_window_width(None, forwards);
+            self.floating.toggle_main_size(self.axis(), None, forwards);
         } else {
             self.scrolling.toggle_width(forwards);
         }
@@ -1270,7 +1332,7 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn set_column_width(&mut self, change: SizeChange) {
         if self.floating_is_active.get() {
-            self.floating.set_window_width(None, change, true);
+            self.floating.set_main_size(self.axis(), None, change, true);
         } else {
             self.scrolling.set_window_width(None, change);
         }
@@ -1280,7 +1342,8 @@ impl<W: LayoutElement> Workspace<W> {
         if window.map_or(self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
-            self.floating.set_window_width(window, change, true);
+            self.floating
+                .set_main_size(self.axis(), window, change, true);
         } else {
             self.scrolling.set_window_width(window, change);
         }
@@ -1290,7 +1353,8 @@ impl<W: LayoutElement> Workspace<W> {
         if window.map_or(self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
-            self.floating.set_window_height(window, change, true);
+            self.floating
+                .set_cross_size(self.axis(), window, change, true);
         } else {
             self.scrolling.set_window_height(window, change);
         }
@@ -1309,7 +1373,8 @@ impl<W: LayoutElement> Workspace<W> {
         if window.map_or(self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
-            self.floating.toggle_window_width(window, forwards);
+            self.floating
+                .toggle_main_size(self.axis(), window, forwards);
         } else {
             self.scrolling.toggle_window_width(window, forwards);
         }
@@ -1319,7 +1384,8 @@ impl<W: LayoutElement> Workspace<W> {
         if window.map_or(self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
-            self.floating.toggle_window_height(window, forwards);
+            self.floating
+                .toggle_cross_size(self.axis(), window, forwards);
         } else {
             self.scrolling.toggle_window_height(window, forwards);
         }
@@ -1514,12 +1580,17 @@ impl<W: LayoutElement> Workspace<W> {
             }
         }
 
+        let axis = if self.is_floating(&id) {
+            AxisMap::default()
+        } else {
+            self.axis()
+        };
         let (tile, new_render_pos) = self
             .tiles_with_render_positions_mut(false)
             .find(|(tile, _)| *tile.window().id() == id)
             .unwrap();
 
-        tile.animate_move_from(render_pos - new_render_pos);
+        tile.animate_move_from(axis.point_in(render_pos - new_render_pos));
     }
 
     pub fn set_window_floating(&mut self, id: Option<&W::Id>, floating: bool) {
@@ -1991,16 +2062,17 @@ impl<W: LayoutElement> Workspace<W> {
         let trigger_width = config.trigger_width;
 
         // This working area intentionally does not include extra struts from Options.
-        let x = pos.x - self.working_area.loc.x;
-        let width = self.working_area.size.w;
+        let axis = self.axis();
+        let coord = axis.point_main(pos) - axis.point_main(self.working_area.loc);
+        let span = axis.size_main(self.working_area.size);
 
-        let x = x.clamp(0., width);
-        let trigger_width = trigger_width.clamp(0., width / 2.);
+        let coord = coord.clamp(0., span);
+        let trigger_width = trigger_width.clamp(0., span / 2.);
 
-        let delta = if x < trigger_width {
-            -(trigger_width - x)
-        } else if width - x < trigger_width {
-            trigger_width - (width - x)
+        let delta = if coord < trigger_width {
+            -(trigger_width - coord)
+        } else if span - coord < trigger_width {
+            trigger_width - (span - coord)
         } else {
             0.
         };
@@ -2110,8 +2182,12 @@ impl<W: LayoutElement> Workspace<W> {
             options.layout.background_color.to_array_unpremul(),
         );
 
-        assert_eq!(self.view_size, self.scrolling.view_size());
-        assert_eq!(self.working_area, self.scrolling.parent_area());
+        let axis = AxisMap::new(options.layout.main_axis);
+        let scrolling_view_size = axis.size_in(self.view_size);
+        let scrolling_parent_area = axis.rect_in(self.working_area);
+
+        assert_eq!(scrolling_view_size, self.scrolling.view_size());
+        assert_eq!(scrolling_parent_area, self.scrolling.parent_area());
         assert_eq!(&self.clock, self.scrolling.clock());
         assert!(Rc::ptr_eq(&self.options, self.scrolling.options()));
         self.scrolling.verify_invariants();

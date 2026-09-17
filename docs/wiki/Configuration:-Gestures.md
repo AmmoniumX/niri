@@ -60,16 +60,16 @@ gestures {
 
 <sup>Since: 25.05</sup>
 
-Scroll the workspaces up/down when moving the mouse cursor against a monitor edge during drag-and-drop (DnD) while in the overview.
+Scroll the workspaces along the overview strip when moving the mouse cursor against the relevant monitor edge during drag-and-drop (DnD) while in the overview.
 Also works on a touchscreen.
 
 The options are:
 
-- `trigger-height`: size of the area near the monitor edge that will trigger the scrolling, in logical pixels.
+- `trigger-height`: size of the area near the relevant monitor edge that will trigger the scrolling, in logical pixels.
 - `delay-ms`: delay in milliseconds before the scrolling starts.
 Avoids unwanted scrolling when dragging things across monitors.
-- `max-speed`: maximum scrolling speed; 1500 corresponds to one screen height per second.
-The scrolling speed increases linearly as you move your mouse cursor from `trigger-width` to the very edge of the monitor.
+- `max-speed`: maximum scrolling speed; 1500 corresponds to moving by about one screen span per second along the overview strip.
+The scrolling speed increases linearly as you move your mouse cursor from `trigger-height` to the very edge of the monitor.
 
 ```kdl
 gestures {

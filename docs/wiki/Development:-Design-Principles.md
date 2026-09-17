@@ -81,6 +81,8 @@ Here are some design considerations for the window layout logic.
 
 1. Setting window width or height to a fixed pixel size (e.g. `set-column-width 1280` or `default-column-width { fixed 1280; }`) will set the size of the window itself, however setting to a proportional size (e.g. `set-column-width 50%`) will set the size of the tile, including the border added by niri.
 
+    For vertical main-axis layouts, keep the action names stable and reinterpret them by axis: `column-width` refers to main-axis span, while `window-height` refers to cross-axis span.
+
     - With proportions, the user is looking to tile multiple windows on the screen, so they should include borders.
     - With fixed sizes, the user wants to test a specific client size or take a specifically sized screenshot, so they should affect the window directly.
     - After the size is set, it is always converted to a value that includes the borders, to make the code sane. That is, `set-column-width 1000` followed by changing the niri border width will resize the window accordingly.
@@ -130,7 +132,7 @@ They assume QWERTY.
 The binds are ordered in a way to gradually introduce you to different bind configuration concepts.
 
 The general system is: if a hotkey switches somewhere, then adding <kbd>Ctrl</kbd> will move the focused window or column there.
-Adding <kbd>Shift</kbd> does an alternative action: for focus and movement it starts going across monitors, for resizes it starts acting on window height rather than width, etc.
+Adding <kbd>Shift</kbd> does an alternative action: for focus and movement it starts going across monitors, for resizes it starts acting on the cross-axis size rather than the main-axis size, etc.
 Workspace switching on <kbd>Mod</kbd><kbd>U</kbd>/<kbd>I</kbd> is one key up from <kbd>Mod</kbd><kbd>J</kbd>/<kbd>K</kbd> used for window switching.
 
 Since <kbd>Alt</kbd> is a modifier in nested niri, binds with explicit <kbd>Alt</kbd> are mainly the ones only useful on the host, for example spawning a screen locker.

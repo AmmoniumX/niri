@@ -95,6 +95,8 @@ binds {
 }
 ```
 
+With [`layout.main-axis "vertical"`](./Configuration:-Layout.md#main-axis), directional focus and move actions keep their screen directions. Column sizing, indices and consume/expel actions follow the layout axes.
+
 Similarly, you can bind touchpad scroll "ticks".
 Touchpad scrolling is continuous, so for these binds it is split into discrete intervals based on distance travelled.
 

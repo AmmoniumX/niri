@@ -11,6 +11,7 @@ use smithay::input::SeatHandler;
 use smithay::output::Output;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
+use crate::input::axis_policy::InputAxisPolicy;
 use crate::layout::workspace::WorkspaceId;
 use crate::niri::State;
 
@@ -19,6 +20,7 @@ pub struct SpatialMovementGrab {
     last_location: Point<f64, Logical>,
     output: Output,
     workspace_id: WorkspaceId,
+    axis_policy: InputAxisPolicy,
     gesture: GestureState,
 
     // Accumulated and applied in frame().
@@ -39,6 +41,7 @@ impl SpatialMovementGrab {
         start_data: PointerGrabStartData<State>,
         output: Output,
         workspace_id: WorkspaceId,
+        axis_policy: InputAxisPolicy,
         is_view_offset: bool,
     ) -> Self {
         let location = start_data.location;
@@ -53,6 +56,7 @@ impl SpatialMovementGrab {
             start_data,
             output,
             workspace_id,
+            axis_policy,
             gesture,
             new_location: location,
             event_timestamp: None,
@@ -86,12 +90,16 @@ impl SpatialMovementGrab {
 
                 // Check if the gesture moved far enough to decide. Threshold copied from GTK 4.
                 if c.x * c.x + c.y * c.y >= 8. * 8. {
-                    if c.x.abs() > c.y.abs() {
+                    let start_view_offset = self.axis_policy.gesture_prefers_view_offset(c.x, c.y);
+                    let (view_delta, workspace_delta) =
+                        self.axis_policy.split_view_workspace_deltas(-c.x, -c.y);
+
+                    if start_view_offset {
                         self.gesture = GestureState::ViewOffset;
                         if let Some((ws_idx, ws)) = layout.find_workspace_by_id(self.workspace_id) {
                             if ws.current_output() == Some(&self.output) {
                                 layout.view_offset_gesture_begin(&self.output, Some(ws_idx), false);
-                                layout.view_offset_gesture_update(-c.x, timestamp, false)
+                                layout.view_offset_gesture_update(view_delta, timestamp, false)
                             } else {
                                 None
                             }
@@ -101,17 +109,23 @@ impl SpatialMovementGrab {
                     } else {
                         self.gesture = GestureState::WorkspaceSwitch;
                         layout.workspace_switch_gesture_begin(&self.output, false);
-                        layout.workspace_switch_gesture_update(-c.y, timestamp, false)
+                        layout.workspace_switch_gesture_update(workspace_delta, timestamp, false)
                     }
                 } else {
                     Some(None)
                 }
             }
             GestureState::ViewOffset => {
-                layout.view_offset_gesture_update(-delta.x, timestamp, false)
+                let (view_delta, _) = self
+                    .axis_policy
+                    .split_view_workspace_deltas(-delta.x, -delta.y);
+                layout.view_offset_gesture_update(view_delta, timestamp, false)
             }
             GestureState::WorkspaceSwitch => {
-                layout.workspace_switch_gesture_update(-delta.y, timestamp, false)
+                let (_, workspace_delta) = self
+                    .axis_policy
+                    .split_view_workspace_deltas(-delta.x, -delta.y);
+                layout.workspace_switch_gesture_update(workspace_delta, timestamp, false)
             }
         };
 

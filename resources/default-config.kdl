@@ -125,6 +125,9 @@ layout {
     //   together with the previously focused column.
     center-focused-column "never"
 
+    // Use "vertical" to scroll rows top-to-bottom, e.g. in a portrait output's layout override.
+    // main-axis "horizontal"
+
     // You can customize the widths that "switch-preset-column-width" (Mod+R) toggles between.
     preset-column-widths {
         // Proportion sets the width as a fraction of the output width, taking gaps into account.

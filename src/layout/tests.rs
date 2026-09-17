@@ -3,8 +3,8 @@ use std::cell::{Cell, OnceCell, RefCell};
 use niri_config::utils::Flag;
 use niri_config::workspace::WorkspaceName;
 use niri_config::{
-    CenterFocusedColumn, FloatOrInt, OutputName, Struts, TabIndicatorLength, TabIndicatorPosition,
-    WorkspaceReference,
+    CenterFocusedColumn, FloatOrInt, MainAxis, OutputName, Struts, TabIndicatorLength,
+    TabIndicatorPosition, WorkspaceReference,
 };
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
@@ -2620,6 +2620,460 @@ fn unhide_next_to_remaining_hidden_block_keeps_empty_workspace_before_it() {
 }
 
 #[test]
+fn vertical_main_axis_places_columns_vertically() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::AddWindow {
+                params: TestWindowParams::new(2),
+            },
+        ],
+    );
+
+    let ws = layout.active_workspace().unwrap();
+    let positions: Vec<_> = ws
+        .tiles_with_render_positions()
+        .map(|(_, pos, _)| pos)
+        .collect();
+
+    assert_eq!(positions.len(), 2);
+
+    let dx = (positions[0].x - positions[1].x).abs();
+    let dy = (positions[0].y - positions[1].y).abs();
+    assert!(
+        dy > dx,
+        "expected vertical separation, got dx={dx}, dy={dy}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_insert_position_follows_y() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::AddWindow {
+                params: TestWindowParams::new(2),
+            },
+        ],
+    );
+
+    let ws = layout.active_workspace().unwrap();
+    let mut centers: Vec<_> = ws
+        .tiles_with_render_positions()
+        .map(|(tile, pos, _)| {
+            let size = tile.window().size().to_f64();
+            Point::from((pos.x + size.w / 2., pos.y + size.h / 2.))
+        })
+        .collect();
+    centers.sort_by(|a, b| a.y.total_cmp(&b.y));
+
+    assert_eq!(centers.len(), 2);
+
+    let insert_col_idx = |center| match ws.scrolling_insert_position(center) {
+        super::monitor::InsertPosition::NewColumn(idx)
+        | super::monitor::InsertPosition::InColumn(idx, _) => idx,
+        super::monitor::InsertPosition::Floating => unreachable!(),
+    };
+
+    let upper_idx = insert_col_idx(centers[0]);
+    let lower_idx = insert_col_idx(centers[1]);
+
+    assert!(
+        lower_idx > upper_idx,
+        "expected insert position to progress with y, got upper={upper_idx}, lower={lower_idx}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_dnd_edge_scroll_uses_vertical_edges() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::AddWindow {
+                params: TestWindowParams::new(2),
+            },
+        ],
+    );
+
+    let ws = layout.active_workspace_mut().unwrap();
+    let area = ws.working_area();
+
+    ws.dnd_scroll_gesture_begin();
+
+    let center =
+        Point::<f64, Logical>::from((area.loc.x + area.size.w / 2., area.loc.y + area.size.h / 2.));
+    let left = Point::from((area.loc.x + 1., center.y));
+    let top = Point::from((center.x, area.loc.y + 1.));
+
+    assert!(!ws.dnd_scroll_gesture_scroll(left, 1.));
+    assert!(ws.dnd_scroll_gesture_scroll(top, 1.));
+}
+
+#[test]
+fn vertical_main_axis_overview_places_workspaces_horizontally() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::FocusWorkspaceDown,
+            Op::AddWindow {
+                params: TestWindowParams::new(2),
+            },
+            Op::ToggleOverview,
+        ],
+    );
+
+    let output = layout
+        .outputs()
+        .find(|output| output.name() == "output1")
+        .cloned()
+        .unwrap();
+    let monitor = layout.monitor_for_output(&output).unwrap();
+
+    let geos: Vec<_> = monitor.workspaces_render_geo().take(2).collect();
+    assert_eq!(geos.len(), 2);
+
+    let dx = (geos[0].loc.x - geos[1].loc.x).abs();
+    let dy = (geos[0].loc.y - geos[1].loc.y).abs();
+    assert!(
+        dx > dy,
+        "expected overview workspaces to be arranged horizontally, got dx={dx}, dy={dy}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_set_column_width_changes_tile_height() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+        ],
+    );
+
+    let (_, win) = layout.windows().next().unwrap();
+    let before = win.requested_size().unwrap();
+
+    check_ops_on_layout(
+        &mut layout,
+        [Op::SetColumnWidth(SizeChange::AdjustProportion(5.))],
+    );
+
+    let (_, win) = layout.windows().next().unwrap();
+    let after = win.requested_size().unwrap();
+
+    assert_eq!(before.w, after.w);
+    assert!(
+        after.h > before.h,
+        "expected height to grow: {before:?} -> {after:?}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_interactive_resize_bottom_changes_tile_height() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+        ],
+    );
+
+    let (_, win) = layout.windows().next().unwrap();
+    let before = win.requested_size().unwrap();
+
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::InteractiveResizeBegin {
+                window: 1,
+                edges: ResizeEdge::BOTTOM,
+            },
+            Op::InteractiveResizeUpdate {
+                window: 1,
+                dx: 0.,
+                dy: 120.,
+            },
+            Op::InteractiveResizeEnd { window: 1 },
+        ],
+    );
+
+    let (_, win) = layout.windows().next().unwrap();
+    let after = win.requested_size().unwrap();
+
+    assert_eq!(before.w, after.w);
+    assert!(
+        after.h > before.h,
+        "expected interactive resize to grow height: {before:?} -> {after:?}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_interactive_move_tracks_pointer_along_y() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+        ],
+    );
+
+    let output = layout
+        .outputs()
+        .find(|o| o.name() == "output1")
+        .cloned()
+        .unwrap();
+
+    let (tile_pos, start) = {
+        let ws = layout.active_workspace().unwrap();
+        let (tile, tile_pos, _) = ws
+            .tiles_with_render_positions()
+            .find(|(tile, _, _)| *tile.window().id() == 1)
+            .unwrap();
+
+        let start = tile_pos + tile.window_loc() + Point::from((10., 10.));
+        (tile_pos, start)
+    };
+
+    assert!(layout.interactive_move_begin(1, &output, start));
+
+    let delta = Point::from((0., 220.));
+    let pointer_pos = start + delta;
+    assert!(layout.interactive_move_update(&1, delta, output.clone(), pointer_pos));
+
+    let tile_pos_after = {
+        let ws = layout.active_workspace().unwrap();
+        ws.tiles_with_render_positions()
+            .find(|(tile, _, _)| *tile.window().id() == 1)
+            .unwrap()
+            .1
+    };
+
+    let moved_x = (tile_pos_after.x - tile_pos.x).abs();
+    let moved_y = (tile_pos_after.y - tile_pos.y).abs();
+    assert!(
+        moved_y > moved_x,
+        "expected move gesture to follow y in vertical mode, got dx={moved_x}, dy={moved_y}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_floating_move_column_right_moves_window_right() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::ToggleWindowFloating { id: None },
+        ],
+    );
+
+    let mut before = None;
+    layout.with_windows(|win, _, _, layout| {
+        if *win.id() == 1 {
+            before = layout.tile_pos_in_workspace_view;
+        }
+    });
+    let before = before.unwrap();
+
+    check_ops_on_layout(&mut layout, [Op::MoveColumnRight]);
+
+    let mut after = None;
+    layout.with_windows(|win, _, _, layout| {
+        if *win.id() == 1 {
+            after = layout.tile_pos_in_workspace_view;
+        }
+    });
+    let after = after.unwrap();
+
+    let moved_x = after.0 - before.0;
+    let moved_y = after.1 - before.1;
+    assert!(
+        moved_x > moved_y.abs(),
+        "expected move-column-right to move floating window right in vertical mode, got dx={moved_x}, dy={moved_y}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_floating_move_window_down_moves_window_down() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::ToggleWindowFloating { id: None },
+        ],
+    );
+
+    let mut before = None;
+    layout.with_windows(|win, _, _, layout| {
+        if *win.id() == 1 {
+            before = layout.tile_pos_in_workspace_view;
+        }
+    });
+    let before = before.unwrap();
+
+    check_ops_on_layout(&mut layout, [Op::MoveWindowDown]);
+
+    let mut after = None;
+    layout.with_windows(|win, _, _, layout| {
+        if *win.id() == 1 {
+            after = layout.tile_pos_in_workspace_view;
+        }
+    });
+    let after = after.unwrap();
+
+    let moved_x = after.0 - before.0;
+    let moved_y = after.1 - before.1;
+    assert!(
+        moved_y > moved_x.abs(),
+        "expected move-window-down to move floating window down in vertical mode, got dx={moved_x}, dy={moved_y}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_floating_set_column_width_changes_window_height() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::ToggleWindowFloating { id: None },
+        ],
+    );
+
+    let (_, win) = layout.windows().next().unwrap();
+    let before = win.expected_size().unwrap();
+
+    check_ops_on_layout(
+        &mut layout,
+        [Op::SetColumnWidth(SizeChange::AdjustProportion(5.))],
+    );
+
+    let (_, win) = layout.windows().next().unwrap();
+    let after = win.expected_size().unwrap();
+
+    assert_eq!(before.w, after.w);
+    assert!(
+        after.h > before.h,
+        "expected floating column width to grow height in vertical mode: {before:?} -> {after:?}"
+    );
+}
+
+#[test]
+fn vertical_main_axis_floating_set_window_height_changes_window_width() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::ToggleWindowFloating { id: None },
+        ],
+    );
+
+    let (_, win) = layout.windows().next().unwrap();
+    let before = win.expected_size().unwrap();
+
+    check_ops_on_layout(
+        &mut layout,
+        [Op::SetWindowHeight {
+            id: None,
+            change: SizeChange::AdjustProportion(5.),
+        }],
+    );
+
+    let (_, win) = layout.windows().next().unwrap();
+    let after = win.expected_size().unwrap();
+
+    assert_eq!(before.h, after.h);
+    assert!(
+        after.w > before.w,
+        "expected floating window height to grow width in vertical mode: {before:?} -> {after:?}"
+    );
+}
+
+#[test]
+fn scrolling_windows_have_ipc_tile_positions() {
+    let layout = check_ops([
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+    ]);
+
+    let mut tile_pos = None;
+    layout.with_windows(|win, _, _, layout| {
+        if *win.id() == 1 {
+            tile_pos = layout.tile_pos_in_workspace_view;
+        }
+    });
+
+    assert!(tile_pos.is_some());
+}
+
+#[test]
 fn operations_dont_panic() {
     if std::env::var_os("RUN_SLOW_TESTS").is_none() {
         eprintln!("ignoring slow test");
@@ -4855,6 +5309,7 @@ prop_compose! {
 
 prop_compose! {
     fn arbitrary_layout_part()(
+        main_axis in prop::option::of(prop_oneof![Just(MainAxis::Horizontal), Just(MainAxis::Vertical)]),
         gaps in prop::option::of(arbitrary_spacing().prop_map(FloatOrInt)),
         struts in prop::option::of(arbitrary_struts()),
         focus_ring in prop::option::of(arbitrary_focus_ring()),
@@ -4866,6 +5321,7 @@ prop_compose! {
         empty_workspace_above_first in prop::option::of(any::<bool>().prop_map(Flag)),
     ) -> niri_config::LayoutPart {
         niri_config::LayoutPart {
+            main_axis,
             gaps,
             struts,
             center_focused_column,
@@ -6691,4 +7147,255 @@ fn reset_carousel_center_noop_when_active_not_in_set() {
 
     layout.reset_carousel_center();
     assert_eq!(layout.carousel_rotation_target(), 1.0); // unchanged: active "A" not in set
+}
+
+#[test]
+fn vertical_main_axis_preserves_physical_struts_and_bounds() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+    options.layout.struts = Struts {
+        left: FloatOrInt(31.),
+        right: FloatOrInt(73.),
+        top: FloatOrInt(19.),
+        bottom: FloatOrInt(47.),
+    };
+    let layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+        ],
+    );
+    let ws = layout.active_workspace().unwrap();
+    let bounds = ws
+        .scrolling()
+        .new_window_toplevel_bounds(&ResolvedWindowRules::default());
+    assert_eq!(
+        bounds,
+        Size::from((1280 - 31 - 73 - 32, 720 - 19 - 47 - 32))
+    );
+    let (_, position, _) = ws.tiles_with_render_positions().next().unwrap();
+    assert_eq!(position, Point::from((31. + 16., 19. + 16.)));
+}
+
+#[test]
+fn vertical_main_axis_carousel_geometry_matches_live_overview() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+    let layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::FocusWorkspaceDown,
+            Op::AddWindow {
+                params: TestWindowParams::new(2),
+            },
+            Op::ToggleOverview,
+            Op::CompleteAnimations,
+        ],
+    );
+    let monitor = layout.monitors().next().unwrap();
+    let zoom = monitor.overview_zoom();
+    let live: Vec<_> = monitor
+        .workspaces_with_render_geo()
+        .map(|(ws, geo)| (ws.id(), geo))
+        .collect();
+    let panel: Vec<_> = monitor
+        .workspaces_with_render_geo_at_zoom(zoom)
+        .map(|(ws, geo)| (ws.id(), geo))
+        .collect();
+    assert_eq!(live, panel);
+    assert!(live.len() > 1);
+}
+
+#[test]
+fn vertical_main_axis_output_and_workspace_overrides_reload_and_transfer() {
+    let vertical = niri_config::LayoutPart {
+        main_axis: Some(MainAxis::Vertical),
+        ..Default::default()
+    };
+    let horizontal = niri_config::LayoutPart {
+        main_axis: Some(MainAxis::Horizontal),
+        ..Default::default()
+    };
+    let mut layout = check_ops([
+        Op::AddOutput(1),
+        Op::AddScaledOutput {
+            id: 2,
+            scale: 1.25,
+            layout_config: Some(Box::new(vertical.clone())),
+        },
+        Op::FocusOutput(2),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+    ]);
+    assert_eq!(
+        layout.active_workspace().unwrap().main_axis(),
+        MainAxis::Vertical
+    );
+    let positions: Vec<_> = layout
+        .active_workspace()
+        .unwrap()
+        .tiles_with_render_positions()
+        .map(|(_, pos, _)| pos)
+        .collect();
+    assert_eq!(positions[0].x, positions[1].x);
+    assert_ne!(positions[0].y, positions[1].y);
+    check_ops_on_layout(
+        &mut layout,
+        [Op::UpdateOutputLayoutConfig {
+            id: 2,
+            layout_config: Some(Box::new(horizontal.clone())),
+        }],
+    );
+    assert_eq!(
+        layout.active_workspace().unwrap().main_axis(),
+        MainAxis::Horizontal
+    );
+    check_ops_on_layout(
+        &mut layout,
+        [Op::AddNamedWorkspace {
+            ws_name: 1,
+            output_name: Some(2),
+            layout_config: Some(Box::new(vertical)),
+        }],
+    );
+    let ws = layout
+        .workspaces()
+        .find(|(_, _, ws)| ws.name().is_some())
+        .unwrap()
+        .2;
+    assert_eq!(ws.main_axis(), MainAxis::Vertical);
+    check_ops_on_layout(&mut layout, [Op::RemoveOutput(2)]);
+    // A named workspace keeps its override after migration to a landscape output.
+    let ws = layout
+        .workspaces()
+        .find(|(_, _, ws)| ws.name().is_some())
+        .unwrap()
+        .2;
+    assert_eq!(ws.main_axis(), MainAxis::Vertical);
+}
+
+#[test]
+fn vertical_main_axis_directional_focus_follows_screen() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::AddWindow {
+                params: TestWindowParams::new(2),
+            },
+            Op::AddWindow {
+                params: TestWindowParams::new(3),
+            },
+            Op::ConsumeOrExpelWindowLeft { id: None },
+        ],
+    );
+    assert_eq!(*layout.focus().unwrap().id(), 3);
+    layout.focus_left();
+    assert_eq!(*layout.focus().unwrap().id(), 2);
+    layout.focus_up();
+    assert_eq!(*layout.focus().unwrap().id(), 1);
+    layout.focus_down();
+    assert_eq!(*layout.focus().unwrap().id(), 2);
+    layout.focus_right();
+    assert_eq!(*layout.focus().unwrap().id(), 3);
+    layout.verify_invariants();
+}
+
+#[test]
+fn vertical_main_axis_tab_indicator_hit_stays_on_physical_top() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+    options.layout.default_column_display = ColumnDisplay::Tabbed;
+    options.layout.tab_indicator.position = TabIndicatorPosition::Top;
+    options.layout.tab_indicator.place_within_column = true;
+    options.layout.tab_indicator.hide_when_single_tab = false;
+    options.layout.tab_indicator.width = 8.;
+    options.layout.tab_indicator.gap = 4.;
+    let layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::CompleteAnimations,
+        ],
+    );
+    let ws = layout.active_workspace().unwrap();
+    let (tile, pos, _) = ws.tiles_with_render_positions().next().unwrap();
+    let pointer = pos + Point::from((tile.tile_size().w / 2., -8.));
+    let (window, hit) = ws
+        .scrolling()
+        .window_under(pointer)
+        .expect("top tab must be clickable");
+    assert_eq!(*window.id(), 1);
+    assert!(matches!(
+        hit,
+        HitType::Activate {
+            is_tab_indicator: true
+        }
+    ));
+    assert_eq!(pos.y, 16. + 12.);
+}
+
+#[test]
+fn vertical_main_axis_drag_keeps_physical_pointer_anchor() {
+    let mut options = Options::default();
+    options.layout.main_axis = MainAxis::Vertical;
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::CompleteAnimations,
+        ],
+    );
+    let ws = layout.active_workspace().unwrap();
+    let (tile, pos, _) = ws.tiles_with_render_positions().next().unwrap();
+    let size = tile.window_size();
+    let pointer = pos + tile.window_loc() + Point::from((size.w * 0.25, size.h * 0.75));
+    let output = layout.outputs().next().unwrap().clone();
+    assert!(layout.interactive_move_begin(1, &output, pointer));
+    let Some(InteractiveMoveState::Starting {
+        pointer_ratio_within_window,
+        ..
+    }) = &layout.interactive_move
+    else {
+        panic!("drag must start");
+    };
+    assert_eq!(*pointer_ratio_within_window, (0.25, 0.75));
+
+    let delta = Point::from((0., 300.));
+    let pointer = pointer + delta;
+    assert!(layout.interactive_move_update(&1, delta, output, pointer));
+    check_ops_on_layout(&mut layout, [Op::CompleteAnimations]);
+    let Some(InteractiveMoveState::Moving(moving)) = &layout.interactive_move else {
+        panic!("drag must detach after crossing the threshold");
+    };
+    let actual_anchor = moving.tile_render_location(1.)
+        + moving.tile.window_loc()
+        + Point::from((
+            moving.tile.window_size().w * 0.25,
+            moving.tile.window_size().h * 0.75,
+        ));
+    assert!((actual_anchor.x - pointer.x).abs() <= 1.);
+    assert!((actual_anchor.y - pointer.y).abs() <= 1.);
 }

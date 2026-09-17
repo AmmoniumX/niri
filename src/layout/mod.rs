@@ -76,6 +76,7 @@ use crate::utils::{
 };
 use crate::window::ResolvedWindowRules;
 
+pub mod axis;
 pub mod carousel;
 pub mod closing_window;
 pub mod floating;
@@ -673,14 +674,17 @@ impl<W: LayoutElement> InteractiveMoveState<W> {
 impl<W: LayoutElement> InteractiveMoveData<W> {
     fn tile_render_location(&self, zoom: f64) -> Point<f64, Logical> {
         let scale = Scale::from(self.output.current_scale().fractional_scale());
+
+        // A detached tile and its pointer anchor are both in physical coordinates.
         let window_size = self.tile.window_size();
+        let window_loc = self.tile.window_loc();
+
         let pointer_offset_within_window = Point::from((
             window_size.w * self.pointer_ratio_within_window.0,
             window_size.h * self.pointer_ratio_within_window.1,
         ));
         let pos = self.pointer_pos_within_output
-            - (pointer_offset_within_window + self.tile.window_loc() - self.tile.render_offset())
-                .upscale(zoom);
+            - (pointer_offset_within_window + window_loc - self.tile.render_offset()).upscale(zoom);
         // Round to physical pixels.
         pos.to_physical_precise_round(scale).to_logical(scale)
     }
@@ -3341,11 +3345,25 @@ impl<W: LayoutElement> Layout<W> {
         };
         let ws = mon.active_workspace();
         if right {
-            ws.focus_right();
+            ws.focus_column_in_direction(true);
         } else {
-            ws.focus_left();
+            ws.focus_column_in_direction(false);
         }
         true
+    }
+
+    /// Resolve wheel and gesture axes against the monitor shown in the carousel lens.
+    pub fn carousel_lens_main_axis(&self) -> Option<niri_config::MainAxis> {
+        if !self.in_carousel_lens() {
+            return None;
+        }
+        let rotation = self.carousel_rotation_target();
+        let ring = self.carousel_ring();
+        let (target_idx, _) = ring
+            .iter()
+            .find(|(_, pos)| pos.round() == rotation.round())?;
+        let outputs = self.carousel_outputs();
+        Some(outputs.get(*target_idx)?.active_workspace_ref().main_axis())
     }
 
     /// The monitor the settled lens is showing, when `in_carousel_lens()`
@@ -5460,32 +5478,38 @@ impl<W: LayoutElement> Layout<W> {
                 let sticky_mon_idx = self
                     .monitors()
                     .position(|mon| mon.sticky_has_window(&window_id));
-                let (is_floating, tile, workspace_config) = if let Some(mon_idx) = sticky_mon_idx {
-                    is_sticky = true;
-                    let mon = self.monitors_mut().nth(mon_idx).unwrap();
-                    let tile = mon
-                        .sticky
-                        .tiles_mut()
-                        .find(|tile| *tile.window().id() == window_id)
-                        .unwrap();
-                    (true, tile, None)
+                let (is_floating, axis, tile, workspace_config) =
+                    if let Some(mon_idx) = sticky_mon_idx {
+                        is_sticky = true;
+                        let mon = self.monitors_mut().nth(mon_idx).unwrap();
+                        let tile = mon
+                            .sticky
+                            .tiles_mut()
+                            .find(|tile| *tile.window().id() == window_id)
+                            .unwrap();
+                        (true, axis::AxisMap::default(), tile, None)
+                    } else {
+                        self.workspaces_mut()
+                            .find(|ws| ws.has_window(&window_id))
+                            .map(|ws| {
+                                let workspace_config =
+                                    ws.layout_config().cloned().map(|c| (ws.id(), c));
+                                (
+                                    ws.is_floating(&window_id),
+                                    ws.axis(),
+                                    ws.tiles_mut()
+                                        .find(|tile| *tile.window().id() == window_id)
+                                        .unwrap(),
+                                    workspace_config,
+                                )
+                            })
+                            .unwrap()
+                    };
+                tile.interactive_move_offset = if is_floating {
+                    pointer_delta.upscale(factor)
                 } else {
-                    self.workspaces_mut()
-                        .find(|ws| ws.has_window(&window_id))
-                        .map(|ws| {
-                            let workspace_config =
-                                ws.layout_config().cloned().map(|c| (ws.id(), c));
-                            (
-                                ws.is_floating(&window_id),
-                                ws.tiles_mut()
-                                    .find(|tile| *tile.window().id() == window_id)
-                                    .unwrap(),
-                                workspace_config,
-                            )
-                        })
-                        .unwrap()
+                    axis.point_in(pointer_delta.upscale(factor))
                 };
-                tile.interactive_move_offset = pointer_delta.upscale(factor);
 
                 // Put it back to be able to easily return.
                 self.interactive_move = Some(InteractiveMoveState::Starting {
@@ -5964,17 +5988,24 @@ impl<W: LayoutElement> Layout<W> {
                 }
 
                 // needed because empty_workspace_above_first could have modified the idx
-                let (tile, tile_offset, ws_geo) = mon
+                let (tile, tile_offset, ws_geo, axis) = mon
                     .workspaces_with_render_geo_mut(false)
                     .find_map(|(ws, geo)| {
+                        let axis = if ws.is_floating(&win_id) {
+                            axis::AxisMap::default()
+                        } else {
+                            ws.axis()
+                        };
                         ws.tiles_with_render_positions_mut(false)
                             .find(|(tile, _)| tile.window().id() == &win_id)
-                            .map(|(tile, tile_offset)| (tile, tile_offset, geo))
+                            .map(|(tile, tile_offset)| (tile, tile_offset, geo, axis))
                     })
                     .unwrap();
                 let new_tile_render_loc = ws_geo.loc + tile_offset.upscale(zoom);
 
-                tile.animate_move_from((tile_render_loc - new_tile_render_loc).downscale(zoom));
+                tile.animate_move_from(
+                    axis.point_in((tile_render_loc - new_tile_render_loc).downscale(zoom)),
+                );
 
                 // Interactive move into floating barely animates (it doesn't really move after
                 // being dropped), so setting it as moving between workspaces would just cause it to

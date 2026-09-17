@@ -8,6 +8,7 @@ use niri_ipc::{PositionChange, SizeChange, WindowLayout};
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Serial, Size};
 
+use super::axis::{AxisDirection, AxisEdge, AxisMap};
 use super::closing_window::{ClosingWindow, ClosingWindowRenderElement};
 use super::scrolling::ColumnWidth;
 use super::tile::{Tile, TileRenderElement, TileRenderSnapshot};
@@ -993,6 +994,20 @@ impl<W: LayoutElement> FloatingSpace<W> {
         }
     }
 
+    pub(super) fn focus_main(&mut self, axis: AxisMap, direction: AxisDirection) -> bool {
+        match direction {
+            AxisDirection::Backward => axis.map_main(self, Self::focus_left, Self::focus_up),
+            AxisDirection::Forward => axis.map_main(self, Self::focus_right, Self::focus_down),
+        }
+    }
+
+    pub(super) fn focus_main_edge(&mut self, axis: AxisMap, edge: AxisEdge) {
+        match edge {
+            AxisEdge::Start => axis.map_main(self, Self::focus_leftmost, Self::focus_topmost),
+            AxisEdge::End => axis.map_main(self, Self::focus_rightmost, Self::focus_bottommost),
+        }
+    }
+
     fn move_to(&mut self, idx: usize, new_pos: Point<f64, Logical>, animate: bool) {
         if animate {
             self.move_and_animate(idx, new_pos);
@@ -1027,6 +1042,50 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     pub fn move_down(&mut self) {
         self.move_by(Point::from((0., DIRECTIONAL_MOVE_PX)));
+    }
+
+    pub(super) fn toggle_main_size(&mut self, axis: AxisMap, id: Option<&W::Id>, forwards: bool) {
+        axis.map_main(
+            self,
+            |floating| floating.toggle_window_width(id, forwards),
+            |floating| floating.toggle_window_height(id, forwards),
+        );
+    }
+
+    pub(super) fn toggle_cross_size(&mut self, axis: AxisMap, id: Option<&W::Id>, forwards: bool) {
+        axis.map_cross(
+            self,
+            |floating| floating.toggle_window_width(id, forwards),
+            |floating| floating.toggle_window_height(id, forwards),
+        );
+    }
+
+    pub(super) fn set_main_size(
+        &mut self,
+        axis: AxisMap,
+        id: Option<&W::Id>,
+        change: SizeChange,
+        animate: bool,
+    ) {
+        axis.map_main(
+            self,
+            |floating| floating.set_window_width(id, change, animate),
+            |floating| floating.set_window_height(id, change, animate),
+        );
+    }
+
+    pub(super) fn set_cross_size(
+        &mut self,
+        axis: AxisMap,
+        id: Option<&W::Id>,
+        change: SizeChange,
+        animate: bool,
+    ) {
+        axis.map_cross(
+            self,
+            |floating| floating.set_window_width(id, change, animate),
+            |floating| floating.set_window_height(id, change, animate),
+        );
     }
 
     pub fn move_window(
