@@ -720,22 +720,40 @@ impl State {
             None => self.niri.config.borrow().input.fallback_keyboard(),
         };
 
+        self.switch_keyboard_config(keyboard_config);
+    }
+
+    /// Applies `keyboard_config` to the seat's keyboard if it differs from the config currently
+    /// active on it, and records it as the active one.
+    pub(crate) fn switch_keyboard_config(&mut self, keyboard_config: niri_config::Keyboard) {
         if keyboard_config == self.niri.current_keyboard {
             return;
         }
 
         if keyboard_config.xkb != self.niri.current_keyboard.xkb {
-            if let Some(xkb_file) = keyboard_config.xkb.file.clone() {
+            // Same chain as reload_config(): a keymap file wins, otherwise the rules-based
+            // config, with locale1 filling in when the config leaves xkb unset. Going through
+            // State::set_xkb_config() keeps num lock across the keymap swap.
+            let mut xkb = keyboard_config.xkb.clone();
+            let mut set_xkb_config = true;
+
+            if let Some(xkb_file) = xkb.file.take() {
                 if let Err(err) = self.set_xkb_file(xkb_file) {
                     warn!("error loading xkb_file for keyboard device: {err:?}");
-                }
-            } else {
-                let keyboard = self.niri.seat.get_keyboard().unwrap();
-                if let Err(err) = keyboard.set_xkb_config(self, keyboard_config.xkb.to_xkb_config())
-                {
-                    warn!("error updating xkb config for keyboard device: {err:?}");
+                } else {
+                    set_xkb_config = false;
                 }
             }
+
+            if set_xkb_config {
+                if xkb == niri_config::Xkb::default() {
+                    xkb = self.niri.xkb_from_locale1.clone().unwrap_or_default();
+                }
+
+                self.set_xkb_config(xkb.to_xkb_config());
+            }
+
+            self.ipc_keyboard_layouts_changed();
         }
 
         if keyboard_config.repeat_rate != self.niri.current_keyboard.repeat_rate
