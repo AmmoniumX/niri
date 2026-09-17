@@ -15,7 +15,7 @@
 > [!IMPORTANT]
 > **This is biri, a custom fork of [niri](https://github.com/niri-wm/niri).**
 >
-> It tracks upstream niri and adds a set of extra features on top: GPU post-process shaders (global, per-region, and per-window), a consolidated multi-monitor carousel overview, dynamic overview zoom presets, isolated "signage" outputs, and runtime touchpad/DWT toggles.
+> It tracks upstream niri and adds a set of extra features on top: vertical scrolling for portrait outputs, GPU post-process shaders (global, per-region, and per-window), a consolidated multi-monitor carousel overview, dynamic overview zoom presets, isolated "signage" outputs, and runtime touchpad/DWT toggles.
 > See [Fork Features](#fork-features) below for the full list.
 >
 > Everything documented for upstream niri still applies. Bugs you hit here should be reported to this fork, not to upstream niri.
@@ -29,6 +29,23 @@ https://github.com/user-attachments/assets/a5e2b72b-a5a3-4aab-a83d-51973a75f6cc
 ## Fork Features
 
 These exist only in biri, not in upstream niri. Unless noted, each is off by default and inert when unconfigured.
+
+### Vertical scrolling for portrait outputs
+
+Use `main-axis "vertical"` to arrange windows in rows that scroll top-to-bottom. Configure it per output to keep a portrait monitor scrolling vertically alongside a landscape monitor scrolling horizontally:
+
+```kdl
+output "DP-2" {
+    layout {
+        main-axis "vertical"
+        default-column-width { proportion 0.5; }
+    }
+}
+```
+
+Replace `DP-2` with your output name. In vertical mode, `default-column-width` sets row height; `proportion 0.5` fits two rows in the visible area. Window content stays upright, and directional focus and move shortcuts keep their screen directions.
+
+You can also set the axis globally or per named workspace, and changes apply on config reload. See [Layout: main-axis](./docs/wiki/Configuration:-Layout.md#main-axis) for sizing, gestures and workspace behavior.
 
 ### Post-process shaders
 
@@ -107,14 +124,15 @@ If these land upstream, the upstream versions replace them here.
 
 ## About
 
-Windows are arranged in columns on an infinite strip going to the right.
+By default, windows are arranged in columns on an infinite strip going to the right.
+The fork's [vertical layout](#vertical-scrolling-for-portrait-outputs) arranges them in rows on a strip going down instead.
 Opening a new window never causes existing windows to resize.
 
 Every monitor has its own separate window strip.
 Windows can never "overflow" onto an adjacent monitor.
 
-Workspaces are dynamic and arranged vertically.
-Every monitor has an independent set of workspaces, and there's always one empty workspace present all the way down.
+Workspaces are dynamic and arranged vertically by default, or horizontally when viewing a vertical layout.
+Every monitor has an independent set of workspaces, and there's always one empty workspace at the end.
 
 The workspace arrangement is preserved across disconnecting and connecting monitors where it makes sense.
 When a monitor disconnects, its workspaces will move to another monitor, but upon reconnection they will move back to the original monitor.
