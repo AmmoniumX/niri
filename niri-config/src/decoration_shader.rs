@@ -18,6 +18,20 @@ pub struct DecorationShader {
     pub animated: bool,
     pub speed: FloatOrInt<0, 10>,
     pub padding: FloatOrInt<0, 1024>,
+    pub light: Option<DecorationLight>,
+}
+
+/// Opt-in light spill derived from the shader's actual premultiplied output.
+#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
+pub struct DecorationLight {
+    #[knuffel(property, default = true)]
+    pub enable: bool,
+    #[knuffel(property, default = FloatOrInt(80.))]
+    pub spread: FloatOrInt<1, 256>,
+    #[knuffel(property, default = FloatOrInt(1.))]
+    pub intensity: FloatOrInt<0, 4>,
+    #[knuffel(property, default = FloatOrInt(0.5))]
+    pub threshold: FloatOrInt<0, 1>,
 }
 
 #[derive(knuffel::Decode)]
@@ -34,6 +48,8 @@ struct ShaderPart {
     speed: FloatOrInt<0, 10>,
     #[knuffel(child, unwrap(argument), default = FloatOrInt(0.))]
     padding: FloatOrInt<0, 1024>,
+    #[knuffel(child)]
+    light: Option<DecorationLight>,
 }
 
 impl DecorationShader {
@@ -106,6 +122,7 @@ impl<S: knuffel::traits::ErrorSpan> knuffel::Decode<S> for DecorationShader {
             animated: part.animated,
             speed: part.speed,
             padding: part.padding,
+            light: part.light,
         })
     }
 }
@@ -119,7 +136,7 @@ mod tests {
     fn shader_rules_replace_and_disable() {
         let config = Config::parse_mem(
             r#"
-            layout { focus-ring { shader { source "global"; padding 12; }; }; }
+            layout { focus-ring { shader { source "global"; padding 12; light; }; }; }
             window-rule { focus-ring { width 8; }; }
             window-rule { focus-ring { shader { source "per-window"; animated false; }; }; }
             window-rule { focus-ring { shader { enable false; }; }; }
@@ -131,12 +148,17 @@ mod tests {
         ring.merge_with(&config.window_rules[0].focus_ring);
         assert_eq!(ring.width, 8.);
         assert_eq!(ring.shader.as_ref().unwrap().key(), original_key);
+        assert!(ring.shader.as_ref().unwrap().light.is_some());
         ring.merge_with(&config.window_rules[1].focus_ring);
         let shader = ring.shader.as_ref().unwrap();
         assert_ne!(shader.key(), original_key);
         assert_eq!(shader.source.as_deref(), Some("per-window"));
         assert_eq!(shader.padding.0, 0., "a shader block replaces all settings");
         assert!(!shader.animated);
+        assert!(
+            shader.light.is_none(),
+            "a shader block also replaces lighting"
+        );
         ring.merge_with(&config.window_rules[2].focus_ring);
         assert_eq!(ring.shader.as_ref().unwrap().key(), None);
     }
@@ -148,6 +170,11 @@ mod tests {
             "source \"x\"; path \"y\";",
             "source \"x\"; padding -1;",
             "source \"x\"; speed 11;",
+            "source \"x\"; light spread=0;",
+            "source \"x\"; light spread=257;",
+            "source \"x\"; light intensity=-1;",
+            "source \"x\"; light intensity=5;",
+            "source \"x\"; light threshold=1.1;",
         ] {
             assert!(
                 Config::parse_mem(&format!(
@@ -157,6 +184,35 @@ mod tests {
                 "{fields}"
             );
         }
+    }
+
+    #[test]
+    fn light_is_opt_in_and_does_not_recompile_the_shader() {
+        let parse = |light| {
+            Config::parse_mem(&format!(
+                "layout {{ focus-ring {{ shader {{ source \"x\"; {light} }}; }}; }}"
+            ))
+            .unwrap()
+            .layout
+            .focus_ring
+            .shader
+            .unwrap()
+        };
+        let plain = parse("");
+        assert!(plain.light.is_none());
+        let defaults = parse("light;");
+        let light = defaults.light.unwrap();
+        assert!(light.enable);
+        assert_eq!(
+            (light.spread.0, light.intensity.0, light.threshold.0),
+            (80., 1., 0.5)
+        );
+        let tuned = parse("light enable=false spread=120 intensity=0.75 threshold=0.25;");
+        assert!(!tuned.light.unwrap().enable);
+        assert_eq!(tuned.light.unwrap().spread.0, 120.);
+        assert_ne!(defaults, tuned, "lighting edits must trigger config reload");
+        assert_eq!(defaults.key(), tuned.key());
+        assert_eq!(plain.key(), tuned.key());
     }
 
     #[test]

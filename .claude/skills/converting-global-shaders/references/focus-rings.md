@@ -11,14 +11,14 @@ window-rule {
         on
         width 6
         shader {
-            path "~/.config/biri/focus-ring/rainbow-ripple.frag"
+            path "~/.config/niri/focus-ring/rainbow-ripple.frag"
             padding 14
         }
     }
 }
 ```
 
-Copy `resources/shaders/focus-ring/` into the user's config directory before referencing it. `rainbow-ripple.frag` is the waxy rainbow; `pulse.frag` is a simple independent cyan pulse. The `.kdl` preset sets a global rainbow ring and resolves its `.frag` beside itself.
+Use `~/.config/niri/config.kdl` and `~/.config/niri/focus-ring/` for standard-install examples; the fork retains the `niri` and `niri-session` command names. Honour an existing custom config location when changing a live setup. Inspect existing files before copying bundled examples, and do not overwrite user-authored effects. `rainbow-ripple.frag` is the waxy rainbow; `pulse.frag` is a simple independent cyan pulse; `lightning.frag` has a travelling blue-white crackle. The `.kdl` preset sets a global rainbow ring and resolves its `.frag` beside itself.
 
 The same block works in `layout`, output/workspace layouts, `border`, and per-window rules. Each application may name a different file. `source "..."` is an inline alternative, mutually exclusive with `path`. Relative paths resolve beside the containing config/include; `~` expands to home.
 
@@ -64,6 +64,20 @@ For wax, use independently wandering contours, uneven pools joined by thin necks
 
 Reserve sufficient `padding` for the maximum outward deformation without changing layout sizes. The wax effect needs at least `width * 2.2 * strength` extra space (the compositor adds an AA pixel). At width 6–8 and strength 0.75, padding 14 suffices. If widening the ring or increasing strength, increase padding too. Pixels beyond the reserved rectangle are clipped. The client stays hollow even if custom code returns an opaque colour everywhere.
 
+## Light spill from existing shaders
+
+Inspect the user's existing shader files before creating a new effect. For light following a bright pulse, keep `ring_color` unchanged and add this child inside its existing `shader` block:
+
+```kdl
+light spread=80 intensity=1.0 threshold=0.5
+```
+
+Lighting is opt-in. `enable=false` or `intensity=0` disables it; spread is 1–256 logical pixels (soft tails extend further), intensity 0–4, threshold 0–1. Defaults match the example. The cutoff uses the brightest premultiplied RGB channel after ring opacity, so increase it to isolate bright pulses or lower it for dim shaders. Existing path watching and config reload handle future changes without rebuilding. Keep the user's effect file and other rules intact.
+
+The compositor renders the actual ring into a half-resolution emission texture at exactly the same time, extracts bright pixels, applies a cached Dual Kawase blur, then screen-blends it over scene windows. This can illuminate its own client and neighbouring/floating/sticky windows; it is screen-space bloom, not ray tracing or material-aware lighting. The ring cutout remains hollow. No screen sampler is exposed to custom GLSL. `padding` reserves ring geometry; lighting has its own expanded bounds. Opening transforms and closing snapshots omit the separate scene light; output capture includes it, isolated window capture does not.
+
+Preserve light ordering above all window content and below compositor/shell overlays, including overview transforms. Track damage over the full halo when phase, geometry, opacity, shader or lighting settings change. Static emission must reuse the blur; disabled/missing/invalid shaders must fall back without lighting. Prefer float intermediate textures to avoid amplified 8-bit banding, with compatible fallbacks. Include halo bounds in visible animation checks.
+
 ## Implementation map (only for changing the shader infrastructure)
 
 | Concern | File |
@@ -74,6 +88,8 @@ Reserve sufficient `padding` for the maximum outward deformation without changin
 | Coordinate contract, client mask, normal-ring fallback | `src/render_helpers/shaders/border.frag` |
 | Program cache, compilation and resource retirement | `src/render_helpers/shaders/mod.rs` |
 | Uniforms, program changes and render damage | `src/render_helpers/border.rs`, `shader_element.rs` |
+| Emission cache, blur and screen-blend composite | `src/render_helpers/decoration_light.rs`, `shaders/decoration_light.frag` |
+| Light placement and stacking | `src/layout/tile.rs`, `monitor.rs` |
 | Eight pieces, padding, phase, visible animation state | `src/layout/focus_ring.rs` |
 | Startup on all backends and reload | `src/backend/{tty,winit,headless}.rs`, `src/niri.rs` |
 | File edit detection | `src/utils/watcher.rs` |
@@ -104,3 +120,12 @@ ffmpeg -v error -framerate 30 -i /tmp/biri-focus-preview/frame-%03d.png -vf 'sca
 ```
 
 Extend the file-based fixture to preview another effect. Inspect rendered frames before sharing; label them as offscreen renders, not live desktop captures. Test visible output, movement, loop continuity, both contours, hollow centre, bounds, and fractional scale. Run `uv run --locked mkdocs build --strict` from `docs/` for wiki changes. Report checks actually completed and their limitations.
+
+For a lightning spill preview using the real compositor renderer:
+
+```sh
+NIRI_LIGHT_PREVIEW_DIR=/tmp/biri-light-preview direnv exec . cargo test --offline -p niri --lib egl_decoration_light_spills_onto_window_content
+ffmpeg -v error -framerate 30 -i /tmp/biri-light-preview/frame-%03d.png -c:v libx264 -pix_fmt yuv420p -movflags +faststart -y /tmp/biri-light-preview.mp4
+```
+
+The test checks illumination on both the owner and a neighbour, pulse motion, unchanged distant pixels, non-darkening blend, cache reuse, opacity damage and threshold reload at 1×/1.25×/2×. The layout test checks light ordering over floating and tiled decorations in normal view and overview, preserving ordinary stacking order when disabled. Inspect frames for banding as well as alignment.

@@ -17,6 +17,7 @@ use crate::render_helpers::blur::BlurProgram;
 
 pub struct Shaders {
     pub border: Option<ShaderProgram>,
+    pub decoration_light: Option<ShaderProgram>,
     pub decorations: RefCell<HashMap<u64, ShaderProgram>>,
     pub panel: Option<ShaderProgram>,
     pub shadow: Option<ShaderProgram>,
@@ -39,6 +40,7 @@ pub struct Shaders {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProgramType {
     Border,
+    DecorationLight,
     Decoration(u64),
     Panel,
     Shadow,
@@ -59,6 +61,18 @@ impl Shaders {
         let border = compile_decoration_program(renderer, None)
             .map_err(|err| warn!("error compiling border shader: {err:?}"))
             .ok();
+
+        let decoration_light = ShaderProgram::compile(
+            renderer,
+            include_str!("decoration_light.frag"),
+            &[
+                UniformName::new("light_gain", UniformType::_1f),
+                UniformName::new("light_tex_scale", UniformType::_2f),
+            ],
+            &["light_texture"],
+        )
+        .map_err(|err| warn!("error compiling decoration light shader: {err:?}"))
+        .ok();
 
         let panel = ShaderProgram::compile(
             renderer,
@@ -171,6 +185,7 @@ impl Shaders {
 
         Self {
             border,
+            decoration_light,
             decorations: RefCell::new(HashMap::new()),
             panel,
             shadow,
@@ -226,6 +241,7 @@ impl Shaders {
     pub fn program(&self, program: ProgramType) -> Option<ShaderProgram> {
         match program {
             ProgramType::Border => self.border.clone(),
+            ProgramType::DecorationLight => self.decoration_light.clone(),
             ProgramType::Decoration(key) => self
                 .decorations
                 .borrow()
@@ -642,6 +658,7 @@ fn compile_decoration_program(
             UniformName::new("border_width", UniformType::_1f),
             UniformName::new("rainbow_ripple", UniformType::_4f),
             UniformName::new("ring_width", UniformType::_1f),
+            UniformName::new("emission_threshold", UniformType::_1f),
             UniformName::new("niri_time", UniformType::_1f),
         ],
         &[],

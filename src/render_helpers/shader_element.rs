@@ -33,6 +33,7 @@ pub struct ShaderRenderElement {
     additional_uniforms: Rc<[Uniform<'static>]>,
     textures: HashMap<String, GlesTexture>,
     kind: Kind,
+    screen_blend: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -208,7 +209,25 @@ impl ShaderRenderElement {
             additional_uniforms,
             textures,
             kind,
+            screen_blend: false,
         }
+    }
+
+    /// Screen blend adds coloured light without darkening or replacing the scene below.
+    pub fn with_screen_blend(mut self) -> Self {
+        self.screen_blend = true;
+        self
+    }
+
+    pub fn set_alpha(&mut self, alpha: f32) {
+        if self.alpha != alpha {
+            self.alpha = alpha;
+            self.damage_all();
+        }
+    }
+
+    pub fn clear_textures(&mut self) {
+        self.textures.clear();
     }
 
     pub fn set_program(&mut self, program: ProgramType) {
@@ -230,6 +249,7 @@ impl ShaderRenderElement {
             additional_uniforms: Rc::new([]),
             textures: HashMap::new(),
             kind,
+            screen_blend: false,
         }
     }
 
@@ -473,6 +493,27 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
                     std::ptr::null(),
                 );
 
+                // Restore exactly the blend state inherited from the enclosing renderer.
+                let mut blend = [0; 4];
+                let mut blend_enabled = ffi::FALSE;
+                if self.screen_blend {
+                    blend_enabled = gl.IsEnabled(ffi::BLEND);
+                    for (slot, name) in blend.iter_mut().zip([
+                        ffi::BLEND_SRC_RGB,
+                        ffi::BLEND_DST_RGB,
+                        ffi::BLEND_SRC_ALPHA,
+                        ffi::BLEND_DST_ALPHA,
+                    ]) {
+                        gl.GetIntegerv(name, slot);
+                    }
+                    gl.Enable(ffi::BLEND);
+                    gl.BlendFuncSeparate(
+                        ffi::ONE,
+                        ffi::ONE_MINUS_SRC_COLOR,
+                        ffi::ONE,
+                        ffi::ONE_MINUS_SRC_ALPHA,
+                    );
+                }
                 let damage_len = damage.len() as i32;
                 if supports_instancing {
                     gl.VertexAttribDivisor(program.attrib_vert as u32, 0);
@@ -501,6 +542,17 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
                     gl.DrawArrays(ffi::TRIANGLES, 0, count);
                 }
 
+                if self.screen_blend {
+                    gl.BlendFuncSeparate(
+                        blend[0] as _,
+                        blend[1] as _,
+                        blend[2] as _,
+                        blend[3] as _,
+                    );
+                    if blend_enabled == ffi::FALSE {
+                        gl.Disable(ffi::BLEND);
+                    }
+                }
                 gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
                 for i in 0..self.textures.len() {
                     aux_texture::unbind(gl, i as u32);

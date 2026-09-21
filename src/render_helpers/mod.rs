@@ -34,6 +34,7 @@ pub mod capture;
 pub mod clipped_surface;
 pub mod damage;
 pub mod debug;
+pub mod decoration_light;
 pub mod effect_buffer;
 pub mod framebuffer_effect;
 pub mod global_shader_element;

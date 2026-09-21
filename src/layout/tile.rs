@@ -140,6 +140,7 @@ niri_render_elements! {
         ExtraDamage = ExtraDamage,
         BackgroundEffect = BackgroundEffectElement,
         Scoped = crate::render_helpers::scoped_shader_element::ScopedShaderElement,
+        DecorationLight = crate::render_helpers::shader_element::ShaderRenderElement,
     }
 }
 
@@ -1449,6 +1450,29 @@ impl<W: LayoutElement> Tile<W> {
             .alpha_animation
             .as_ref()
             .map_or(1., |alpha| alpha.anim.clamped_value()) as f32;
+
+        // Keep light outside opening/fading snapshots so it can illuminate sibling windows.
+        // Custom opening transforms have no stable scene-space light origin until they finish.
+        if self.open_animation.is_none() && self.expanded_progress() < 1. {
+            let location = location + self.bob_offset();
+            if focus_ring {
+                if let Some(light) =
+                    self.focus_ring
+                        .render_light(ctx.renderer, location, tile_alpha)
+                {
+                    push(light.into());
+                }
+            }
+            if let Some(width) = self.visual_border_width() {
+                if let Some(light) = self.border.render_light(
+                    ctx.renderer,
+                    location + Point::from((width, width)),
+                    tile_alpha,
+                ) {
+                    push(light.into());
+                }
+            }
+        }
 
         let mut pushed = false;
         self.window().set_offscreen_data(None);

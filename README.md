@@ -30,6 +30,8 @@ https://github.com/user-attachments/assets/a5e2b72b-a5a3-4aab-a83d-51973a75f6cc
 
 These exist only in biri, not in upstream niri. Unless noted, each is off by default and inert when unconfigured.
 
+A standard install keeps the upstream command names, including `niri` and `niri-session`, and reads `~/.config/niri/config.kdl` (`$XDG_CONFIG_HOME/niri/config.kdl` if set). The examples below use that default location. A different config path must be selected explicitly with `niri -c /path/to/config.kdl` or `NIRI_CONFIG`.
+
 ### Vertical scrolling for portrait outputs
 
 Use `main-axis "vertical"` to arrange windows in rows that scroll top-to-bottom. Configure it per output to keep a portrait monitor scrolling vertically alongside a landscape monitor scrolling horizontally:
@@ -74,7 +76,7 @@ Note the cost: an active global shader disables direct scanout and redraws the w
 
 Load a GLSL file for a focus ring or border, with a different effect for each application. Shader files reload automatically when saved; adding or changing an effect needs no compositor rebuild.
 
-Copy [`resources/shaders/focus-ring/`](./resources/shaders/focus-ring) to `~/.config/biri/focus-ring/`, then add a window rule:
+Copy [`resources/shaders/focus-ring/`](./resources/shaders/focus-ring) to `~/.config/niri/focus-ring/`, then add a window rule:
 
 ```kdl
 window-rule {
@@ -83,7 +85,7 @@ window-rule {
         on
         width 6
         shader {
-            path "~/.config/biri/focus-ring/rainbow-ripple.frag"
+            path "~/.config/niri/focus-ring/rainbow-ripple.frag"
             padding 14
         }
     }
@@ -91,6 +93,18 @@ window-rule {
 ```
 
 The supplied rainbow shader has flowing pastel colours, uneven wax-like edges, and drifting highlights. Edit its `.frag` file to change the material, or point another window rule at `pulse.frag` or your own shader. Rings stay hollow behind transparent windows; extra drawing space from `padding` does not change window sizes. The same `shader` block works in `layout { focus-ring { ... } }` and in borders.
+
+For light spilling onto the focused window and nearby windows, add `light` inside the existing shader block. It follows the shader's actual bright spots, including the travelling pulse in `lightning.frag`:
+
+```kdl
+shader {
+    path "~/.config/niri/focus-ring/lightning.frag"
+    padding 24
+    light spread=80 intensity=1.0 threshold=0.5
+}
+```
+
+`spread` controls the glow's reach, `intensity` its brightness, and `threshold` excludes dim parts of the ring. This is a soft screen-space lighting effect; shader files and lighting settings remain editable without rebuilding.
 
 Animation respects `shader-animation-max-fps`, and static shaders can use `animated false`. Invalid shaders log an error and fall back to configured colours. See [Custom focus-ring and border shaders](./docs/wiki/Configuration:-Layout.md#custom-focus-ring-and-border-shaders) for the shader contract, reload behaviour, and examples. The original `rainbow-ripple` configuration remains supported.
 

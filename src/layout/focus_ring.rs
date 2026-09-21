@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::iter::zip;
 use std::time::Duration;
 
@@ -26,6 +26,7 @@ pub struct FocusRing {
     animating: bool,
     custom_key: Option<u64>,
     custom_shader_available: Cell<bool>,
+    light: RefCell<crate::render_helpers::decoration_light::DecorationLight>,
 }
 
 niri_render_elements! {
@@ -51,6 +52,7 @@ impl FocusRing {
             animating: false,
             custom_key: None,
             custom_shader_available: Cell::new(true),
+            light: RefCell::new(Default::default()),
         }
     }
 
@@ -287,6 +289,9 @@ impl FocusRing {
                 alpha,
             );
         }
+        if self.light_config().is_none() {
+            self.light.borrow_mut().clear();
+        }
         for border in &mut self.borders {
             border.set_rainbow_ripple(ripple);
             border.set_shader(
@@ -298,6 +303,68 @@ impl FocusRing {
                     0.
                 },
             );
+        }
+    }
+
+    fn light_config(&self) -> Option<niri_config::decoration_shader::DecorationLight> {
+        self.config
+            .shader
+            .as_ref()?
+            .light
+            .filter(|light| self.custom_key.is_some() && light.enable && light.intensity.0 > 0.)
+    }
+
+    pub fn light_id(&self) -> Option<smithay::backend::renderer::element::Id> {
+        self.light_config()
+            .map(|_| self.light.borrow().id().clone())
+    }
+
+    pub fn render_light(
+        &self,
+        renderer: &mut impl NiriRenderer,
+        location: Point<f64, Logical>,
+        alpha: f32,
+    ) -> Option<crate::render_helpers::shader_element::ShaderRenderElement> {
+        use crate::render_helpers::shaders::{ProgramType, Shaders};
+        let Some(config) = self.light_config().filter(|_| alpha > 0.) else {
+            self.light.borrow_mut().clear();
+            return None;
+        };
+        let shaders = Shaders::get(renderer);
+        if !shaders
+            .decorations
+            .borrow()
+            .contains_key(&self.custom_key.unwrap())
+            || shaders.program(ProgramType::DecorationLight).is_none()
+        {
+            self.light.borrow_mut().clear();
+            return None;
+        }
+        let sources = self
+            .borders
+            .iter()
+            .zip(self.locations)
+            .map(|(border, loc)| {
+                border
+                    .clone()
+                    .as_emission(config.threshold.0 as f32)
+                    .with_location(loc)
+                    .into()
+            })
+            .collect();
+        match self.light.borrow_mut().render(
+            renderer.as_gles_renderer(),
+            sources,
+            config,
+            self.config.width,
+            location,
+            alpha,
+        ) {
+            Ok(element) => Some(element),
+            Err(err) => {
+                warn!("error rendering decoration light: {err:?}");
+                None
+            }
         }
     }
 
@@ -359,6 +426,9 @@ impl FocusRing {
     /// Outward extent including the fixed envelope for animated bulges.
     pub fn render_outset(&self) -> f64 {
         -self.locations[0].y
+            + self
+                .light_config()
+                .map_or(0., |light| light.spread.0 * 2. + 8.)
     }
 
     pub fn is_off(&self) -> bool {
@@ -433,6 +503,215 @@ mod tests {
         update(&mut ring, true, false, 1.);
         assert!(!ring.is_animating());
     }
+    niri_render_elements! {
+        LightTestElement => {
+            Ring = FocusRingRenderElement,
+            Light = crate::render_helpers::shader_element::ShaderRenderElement,
+            Solid = SolidColorRenderElement,
+        }
+    }
+
+    #[test]
+    fn egl_decoration_light_spills_onto_window_content() {
+        use smithay::backend::allocator::Fourcc;
+        use smithay::backend::egl::native::EGLSurfacelessDisplay;
+        use smithay::backend::egl::{EGLContext, EGLDisplay};
+        use smithay::backend::renderer::gles::GlesRenderer;
+        use smithay::utils::Transform;
+
+        use crate::render_helpers::{render_to_vec, shaders};
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/shaders/focus-ring/lightning.frag");
+        let config = niri_config::Config::parse_mem(&format!(r#"
+            layout {{ focus-ring {{ width 6; shader {{ path {:?}; padding 24; light spread=80 intensity=1.0 threshold=0.5; }}; }}; }}
+        "#, path.to_str().unwrap())).unwrap();
+        let mut renderer = unsafe {
+            let display = EGLDisplay::new(EGLSurfacelessDisplay).unwrap();
+            let context = EGLContext::new(&display).unwrap();
+            GlesRenderer::new(context).unwrap()
+        };
+        crate::render_helpers::resources::init(&mut renderer);
+        shaders::init(&mut renderer);
+        shaders::set_decoration_programs(&mut renderer, &config);
+        assert!(shaders::Shaders::get(&mut renderer)
+            .decoration_light
+            .is_some());
+        let mut ring = FocusRing::new(config.layout.focus_ring);
+        let owner = SolidColorBuffer::new((320., 180.), [0.12, 0.15, 0.18, 1.]);
+        let neighbour = SolidColorBuffer::new((320., 160.), [0.24, 0.12, 0.05, 1.]);
+        let side = SolidColorBuffer::new((180., 180.), [0.06, 0.16, 0.12, 1.]);
+        let background = SolidColorBuffer::new((800., 600.), [0.025, 0.03, 0.04, 1.]);
+        let draw = |renderer: &mut GlesRenderer,
+                    ring: &mut FocusRing,
+                    time,
+                    scale: f64,
+                    light,
+                    opacity| {
+            ring.set_animation_time(Duration::from_secs_f64(time));
+            ring.update_render_elements(
+                (320., 180.).into(),
+                true,
+                false,
+                false,
+                Rectangle::from_size((800., 600.).into()),
+                CornerRadius {
+                    top_left: 14.,
+                    top_right: 14.,
+                    bottom_right: 14.,
+                    bottom_left: 14.,
+                },
+                scale,
+                1.,
+            );
+            let mut elements: Vec<LightTestElement> = Vec::new();
+            let mut commit = None;
+            if light {
+                let elem = ring
+                    .render_light(renderer, (240., 240.).into(), opacity)
+                    .expect("light renders");
+                commit = Some(elem.current_commit());
+                elements.push(elem.into());
+            }
+            ring.render(renderer, (240., 240.).into(), &mut |e| {
+                elements.push(e.into())
+            });
+            for (buffer, location) in [
+                (&owner, (240., 240.)),
+                (&neighbour, (240., 50.)),
+                (&side, (30., 240.)),
+                (&side, (590., 240.)),
+                (&background, (0., 0.)),
+            ] {
+                elements.push(
+                    SolidColorRenderElement::from_buffer(buffer, location, 1., Kind::Unspecified)
+                        .into(),
+                );
+            }
+            let pixels = render_to_vec(
+                renderer,
+                ((800. * scale) as i32, (600. * scale) as i32).into(),
+                scale.into(),
+                Transform::Normal,
+                Fourcc::Abgr8888,
+                elements.into_iter().rev(),
+            )
+            .unwrap();
+            (pixels, commit)
+        };
+        for scale in [1., 1.25, 2.] {
+            let (base, _) = draw(&mut renderer, &mut ring, 0.64, scale, false, 1.);
+            let (lit, commit) = draw(&mut renderer, &mut ring, 0.64, scale, true, 1.);
+            let (repeat, repeat_commit) = draw(&mut renderer, &mut ring, 0.64, scale, true, 1.);
+            assert_eq!(lit, repeat);
+            assert_eq!(
+                commit, repeat_commit,
+                "static emission should reuse its blurred texture without damage"
+            );
+            let pixel = |bytes: &[u8], x, y| {
+                let i = (((y as f64 * scale) as usize) * (800. * scale) as usize
+                    + (x as f64 * scale) as usize)
+                    * 4;
+                [bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]
+            };
+            for (name, x, y) in [("own content", 400, 253), ("neighbour content", 400, 203)] {
+                let before = pixel(&base, x, y);
+                let after = pixel(&lit, x, y);
+                assert!(
+                    after[2] > before[2] + 5,
+                    "{name}: {before:?} -> {after:?} at {scale}"
+                );
+            }
+            assert_eq!(
+                pixel(&base, 400, 60),
+                pixel(&lit, 400, 60),
+                "far content stays unchanged"
+            );
+            assert!(
+                base.chunks_exact(4)
+                    .zip(lit.chunks_exact(4))
+                    .all(|(b, l)| (0..3).all(|c| l[c] >= b[c])),
+                "light must never darken or replace underlying content"
+            );
+            let (moved, moved_commit) = draw(&mut renderer, &mut ring, 2.64, scale, true, 1.);
+            assert_ne!(commit, moved_commit);
+            assert!(
+                pixel(&lit, 400, 203)[2] > pixel(&moved, 400, 203)[2] + 5,
+                "light must track the travelling spot"
+            );
+            let (_, fade_commit) = draw(&mut renderer, &mut ring, 2.64, scale, true, 0.4);
+            assert_ne!(
+                moved_commit, fade_commit,
+                "fading the light damages its whole extent"
+            );
+        }
+        if let Some(dir) = std::env::var_os("NIRI_LIGHT_PREVIEW_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            for i in 0..120 {
+                let (pixels, _) = draw(&mut renderer, &mut ring, i as f64 / 30., 1., true, 1.);
+                let file = std::fs::File::create(
+                    std::path::Path::new(&dir).join(format!("frame-{i:03}.png")),
+                )
+                .unwrap();
+                let mut encoder = png::Encoder::new(file, 800, 600);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .unwrap()
+                    .write_image_data(&pixels)
+                    .unwrap();
+            }
+        }
+        // Threshold edits must refresh emission even when the shader time has not changed.
+        let (before, _) = draw(&mut renderer, &mut ring, 0.64, 1., true, 1.);
+        ring.config
+            .shader
+            .as_mut()
+            .unwrap()
+            .light
+            .as_mut()
+            .unwrap()
+            .threshold
+            .0 = 1.;
+        let (after, _) = draw(&mut renderer, &mut ring, 0.64, 1., true, 1.);
+        assert_ne!(before, after);
+        // A smaller spread reuses the larger emission allocation. Its texture coordinates
+        // must still match a fresh cache, without stretching or stale light at the edge.
+        {
+            let light = ring.config.shader.as_mut().unwrap().light.as_mut().unwrap();
+            light.threshold.0 = 0.5;
+            light.spread.0 = 24.;
+        }
+        let (resized, _) = draw(&mut renderer, &mut ring, 0.64, 1., true, 1.);
+        let mut fresh = FocusRing::new(ring.config.clone());
+        let (expected, _) = draw(&mut renderer, &mut fresh, 0.64, 1., true, 1.);
+        // Different mip extents can change rounding slightly, but not placement/brightness.
+        let difference = resized.iter().zip(&expected).map(|(a, b)| a.abs_diff(*b));
+        assert!(
+            difference.max().unwrap() <= 3,
+            "resizing must preserve light mapping"
+        );
+        ring.config
+            .shader
+            .as_mut()
+            .unwrap()
+            .light
+            .as_mut()
+            .unwrap()
+            .enable = false;
+        assert!(ring
+            .render_light(&mut renderer, (0., 0.).into(), 1.)
+            .is_none());
+        shaders::set_decoration_programs(&mut renderer, &niri_config::Config::default());
+        assert!(
+            fresh
+                .render_light(&mut renderer, (0., 0.).into(), 1.)
+                .is_none(),
+            "unavailable shaders must not emit a fallback glow"
+        );
+    }
+
     #[test]
     fn egl_decoration_files_reload_independently() {
         use niri_config::utils::MergeWith;
