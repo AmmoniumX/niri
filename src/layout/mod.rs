@@ -2044,6 +2044,24 @@ impl<W: LayoutElement> Layout<W> {
         moving_window.chain(visible_windows)
     }
 
+    /// Animated decorations on workspaces actually drawn on this output. Keep this separate
+    /// from layout transitions so idle rings can use the shader FPS cap.
+    pub fn decorations_are_animating(&self, output: &Output) -> bool {
+        let MonitorSet::Normal { monitors, .. } = &self.monitor_set else {
+            return false;
+        };
+        if let Some(move_) = self.interactive_move.as_ref().and_then(|x| x.moving()) {
+            if move_.output == *output && move_.tile.decorations_are_animating(true) {
+                return true;
+            }
+        }
+        let Some(mon) = monitors.iter().find(|mon| &mon.output == output) else {
+            return false;
+        };
+        let focus_ring = !self.interactive_move_is_moving_above_output(output);
+        mon.decorations_are_animating(focus_ring)
+    }
+
     pub fn windows_for_output_mut(&mut self, output: &Output) -> impl Iterator<Item = &mut W> + '_ {
         let MonitorSet::Normal { monitors, .. } = &mut self.monitor_set else {
             panic!()

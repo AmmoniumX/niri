@@ -12,6 +12,7 @@ files are plain fragment shader sources referenced by `path` from window rules.
 | `cursor/` | Full `global-shader {}` blocks: effects that follow the mouse (glow, comet, trail, ripple, spotlight, …). See the note on `cursor-radius` below. | `include` + symlink cycle (below) |
 | `screen/` | Full `global-shader {}` blocks: whole-output colour grades (CRT, grayscale, vignette, warm tint). | same cycle, `screen` group |
 | `close/` | `animations { window-open {} window-close {} }` blocks: a matched open/close pair per effect (whirlpool, melt, ripple, lightning). Each file **owns both nodes** — including it overrides any `window-open`/`window-close` set earlier in `config.kdl`. Nothing else in `animations` is touched. | `include "shaders/current.kdl"` + `scripts/shader-cycle` |
+| `focus-ring/` | Animated focus-ring presets (rainbow ripple). | `include` |
 | `window/` | Per-window `.frag` sources for `shader {}` in window rules (CRT, parchment, pixel mosaic, fisheye + RGB split, text-legibility for transparent terminals, shimmer, ripple drops, Rorschach ink, mercury sheen). | `window-rule { shader { path "…" } }` |
 | `off.kdl` | No-op — linking `current.kdl` here disables the global shader. | |
 | `scripts/` | The cycle scripts the includes/binds below rely on. They expect the bundle copied to `~/.config/biri/` (override with `$BIRI_CONFIG_DIR`). | |

@@ -1,0 +1,10 @@
+// Flowing rainbow ring with uneven wax-like ripples and drifting highlights.
+// Include this file from config.kdl after other layout settings.
+layout {
+    focus-ring {
+        on
+        width 6
+        rainbow-ripple speed=1.0 strength=0.75 brightness=1.0
+    }
+}
+// Optionally set shader-animation-max-fps 60 at the top level of config.kdl.
