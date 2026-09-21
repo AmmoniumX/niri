@@ -7399,3 +7399,89 @@ fn vertical_main_axis_drag_keeps_physical_pointer_anchor() {
     assert!((actual_anchor.x - pointer.x).abs() <= 1.);
     assert!((actual_anchor.y - pointer.y).abs() <= 1.);
 }
+
+#[test]
+fn rainbow_ripple_redraw_visibility() {
+    let mut options = Options::default();
+    options.layout.focus_ring.rainbow_ripple = Some(Default::default());
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::CompleteAnimations,
+        ],
+    );
+    let output = layout.outputs().next().unwrap().clone();
+    layout.update_render_elements(Some(&output));
+    assert!(layout.decorations_are_animating(&output));
+
+    layout.clock.set_complete_instantly(true);
+    assert!(!layout.decorations_are_animating(&output));
+    layout.clock.set_complete_instantly(false);
+    layout.clock.set_rate(0.);
+    assert!(!layout.decorations_are_animating(&output));
+    layout.clock.set_rate(1.);
+
+    check_ops_on_layout(
+        &mut layout,
+        [Op::FocusWorkspaceDown, Op::CompleteAnimations],
+    );
+    layout.update_render_elements(Some(&output));
+    assert!(
+        !layout.decorations_are_animating(&output),
+        "a ring on a hidden workspace must not redraw"
+    );
+
+    check_ops_on_layout(&mut layout, [Op::FocusWorkspaceUp, Op::CompleteAnimations]);
+    layout.update_render_elements(Some(&output));
+    assert!(layout.decorations_are_animating(&output));
+
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::SetFullscreenWindow {
+                window: 1,
+                is_fullscreen: true,
+            },
+            Op::Communicate(1),
+            Op::CompleteAnimations,
+        ],
+    );
+    layout.update_render_elements(Some(&output));
+    assert!(
+        !layout.decorations_are_animating(&output),
+        "fullscreen hides the ring"
+    );
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::SetFullscreenWindow {
+                window: 1,
+                is_fullscreen: false,
+            },
+            Op::Communicate(1),
+            Op::CompleteAnimations,
+        ],
+    );
+    layout.update_render_elements(Some(&output));
+    assert!(layout.decorations_are_animating(&output));
+
+    let mut options = (*layout.options).clone();
+    options
+        .layout
+        .focus_ring
+        .rainbow_ripple
+        .as_mut()
+        .unwrap()
+        .speed
+        .0 = 0.;
+    layout.update_options(options);
+    layout.update_render_elements(Some(&output));
+    assert!(
+        !layout.decorations_are_animating(&output),
+        "a frozen rainbow needs no redraws"
+    );
+}

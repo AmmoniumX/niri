@@ -1,4 +1,5 @@
 use std::iter::zip;
+use std::time::Duration;
 
 use niri_config::{CornerRadius, Gradient, GradientRelativeTo};
 use smithay::backend::renderer::element::{Element as _, Kind};
@@ -20,6 +21,8 @@ pub struct FocusRing {
     use_border_shader: bool,
     config: niri_config::FocusRing,
     thicken_corners: bool,
+    animation_time: Duration,
+    animating: bool,
 }
 
 niri_render_elements! {
@@ -41,11 +44,21 @@ impl FocusRing {
             use_border_shader: false,
             config,
             thicken_corners: true,
+            animation_time: Duration::ZERO,
+            animating: false,
         }
     }
 
     pub fn update_config(&mut self, config: niri_config::FocusRing) {
         self.config = config;
+    }
+
+    pub fn set_animation_time(&mut self, time: Duration) {
+        self.animation_time = time;
+    }
+
+    pub fn is_animating(&self) -> bool {
+        self.animating
     }
 
     pub fn update_shaders(&mut self) {
@@ -66,7 +79,33 @@ impl FocusRing {
         scale: f64,
         alpha: f32,
     ) {
-        let width = self.config.width;
+        let effect = self.config.rainbow_ripple.filter(|effect| {
+            effect.enable
+                && is_active
+                && !is_urgent
+                && !self.config.off
+                && self.config.width > 0.
+                && alpha > 0.
+        });
+        self.animating = effect.is_some_and(|effect| effect.speed.0 > 0.);
+        let ripple = effect.map_or([0.; 4], |effect| {
+            // Reduce in f64 before sending to the GPU to retain precision on long uptimes.
+            let phase = (self.animation_time.as_secs_f64() * effect.speed.0 / 4.).rem_euclid(1.);
+            [
+                phase as f32,
+                effect.strength.0 as f32,
+                effect.brightness.0 as f32,
+                self.config.width as f32,
+            ]
+        });
+        // Reserve a fixed envelope for the waves; the window and its layout never move.
+        let padding = effect.map_or(0., |effect| {
+            (self.config.width * effect.strength.0 * 2.2 * scale + 1.).ceil() / scale
+        });
+        let width = self.config.width + padding;
+        let radius = radius.expanded_by(padding as f32);
+        // The animated decoration is always hollow, including behind translucent clients.
+        let is_border = is_border || effect.is_some();
         self.full_size = win_size + Size::from((width, width)).upscale(2.);
         self.is_border = is_border;
 
@@ -92,7 +131,10 @@ impl FocusRing {
             self.config.inactive_gradient
         };
 
-        self.use_border_shader = radius != CornerRadius::default() || gradient.is_some();
+        self.animating &= gradient.map_or(color.a > 0., |g| g.from.a > 0. || g.to.a > 0.);
+
+        self.use_border_shader =
+            effect.is_some() || radius != CornerRadius::default() || gradient.is_some();
 
         // Set the defaults for solid color + rounded corners.
         let gradient = gradient.unwrap_or_else(|| Gradient::from(color));
@@ -106,7 +148,11 @@ impl FocusRing {
         let rounded_corner_border_width = if is_border {
             // HACK: increase the border width used for the inner rounded corners a tiny bit to
             // reduce background bleed.
-            let extra = if self.thicken_corners { 0.5 } else { 0. };
+            let extra = if self.thicken_corners && effect.is_none() {
+                0.5
+            } else {
+                0.
+            };
             width as f32 + extra
         } else {
             0.
@@ -213,6 +259,9 @@ impl FocusRing {
                 alpha,
             );
         }
+        for border in &mut self.borders {
+            border.set_rainbow_ripple(ripple);
+        }
     }
 
     pub fn render(
@@ -262,6 +311,11 @@ impl FocusRing {
         self.config.width
     }
 
+    /// Outward extent including the fixed envelope for animated bulges.
+    pub fn render_outset(&self) -> f64 {
+        -self.locations[0].y
+    }
+
     pub fn is_off(&self) -> bool {
         self.config.off
     }
@@ -272,5 +326,202 @@ impl FocusRing {
 
     pub fn config(&self) -> &niri_config::FocusRing {
         &self.config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rainbow_ripple_state_and_damage() {
+        let mut ring = FocusRing::new(niri_config::FocusRing {
+            rainbow_ripple: Some(Default::default()),
+            ..Default::default()
+        });
+        let update = |ring: &mut FocusRing, active, urgent, alpha| {
+            ring.update_render_elements(
+                (200., 100.).into(),
+                active,
+                false,
+                urgent,
+                Rectangle::from_size((800., 600.).into()),
+                CornerRadius {
+                    top_left: 12.,
+                    top_right: 12.,
+                    bottom_right: 12.,
+                    bottom_left: 12.,
+                },
+                1.25,
+                alpha,
+            );
+        };
+        update(&mut ring, true, false, 1.);
+        assert!(ring.is_animating());
+        assert!(
+            ring.is_border,
+            "animated rings must stay hollow behind translucent windows"
+        );
+        let commit = ring.borders[0].current_commit();
+        update(&mut ring, true, false, 1.);
+        assert_eq!(ring.borders[0].current_commit(), commit);
+        ring.set_animation_time(Duration::from_millis(100));
+        update(&mut ring, true, false, 1.);
+        assert_ne!(
+            ring.borders[0].current_commit(),
+            commit,
+            "time changes must damage the ring"
+        );
+        for (active, urgent, alpha) in [(false, false, 1.), (true, true, 1.), (true, false, 0.)] {
+            update(&mut ring, active, urgent, alpha);
+            assert!(!ring.is_animating());
+        }
+        ring.config.active_color.a = 0.;
+        update(&mut ring, true, false, 1.);
+        assert!(!ring.is_animating(), "a transparent ring needs no redraws");
+        ring.config.active_color.a = 1.;
+        ring.config.width = 0.;
+        update(&mut ring, true, false, 1.);
+        assert!(!ring.is_animating());
+        ring.config.width = 4.;
+        ring.config.off = true;
+        update(&mut ring, true, false, 1.);
+        assert!(!ring.is_animating());
+    }
+    #[test]
+    fn egl_rainbow_ripple_pixels() {
+        use smithay::backend::allocator::Fourcc;
+        use smithay::backend::egl::native::EGLSurfacelessDisplay;
+        use smithay::backend::egl::{EGLContext, EGLDisplay};
+        use smithay::backend::renderer::gles::GlesRenderer;
+        use smithay::utils::Transform;
+
+        use crate::render_helpers::{render_to_vec, shaders};
+
+        let mut renderer = unsafe {
+            let display = EGLDisplay::new(EGLSurfacelessDisplay).unwrap();
+            let context = EGLContext::new(&display).unwrap();
+            GlesRenderer::new(context).unwrap()
+        };
+        crate::render_helpers::resources::init(&mut renderer);
+        shaders::init(&mut renderer);
+        assert!(
+            BorderRenderElement::has_shader(&mut renderer),
+            "border shader must compile"
+        );
+        for scale in [1., 1.25, 2.] {
+            let mut ring = FocusRing::new(niri_config::FocusRing {
+                width: 8.,
+                rainbow_ripple: Some(Default::default()),
+                ..Default::default()
+            });
+            let size = Size::from(((384. * scale) as i32, (244. * scale) as i32));
+            let mut frame = |time, strength| {
+                ring.config.rainbow_ripple.as_mut().unwrap().strength.0 = strength;
+                ring.set_animation_time(Duration::from_secs_f64(time));
+                ring.update_render_elements(
+                    (320., 180.).into(),
+                    true,
+                    false,
+                    false,
+                    Rectangle::from_size((384., 244.).into()),
+                    CornerRadius {
+                        top_left: 24.,
+                        top_right: 12.,
+                        bottom_right: 0.,
+                        bottom_left: 36.,
+                    },
+                    scale,
+                    1.,
+                );
+                let mut elements = Vec::new();
+                ring.render(&mut renderer, (32., 32.).into(), &mut |elem| {
+                    elements.push(elem)
+                });
+                render_to_vec(
+                    &mut renderer,
+                    size,
+                    scale.into(),
+                    Transform::Normal,
+                    Fourcc::Abgr8888,
+                    elements.into_iter(),
+                )
+                .unwrap()
+            };
+            let first = frame(0., 0.75);
+            let next = frame(0.25, 0.75);
+            assert!(first != next, "the GPU pixels must animate");
+            assert!(
+                first == frame(4., 0.75),
+                "the animation must loop seamlessly"
+            );
+            let alpha = |x: usize, y: usize| first[(y * size.w as usize + x) * 4 + 3];
+            assert_eq!(
+                alpha(size.w as usize / 2, size.h as usize / 2),
+                0,
+                "hollow centre"
+            );
+            assert!(first.chunks_exact(4).filter(|p| p[3] > 128).count() > 1000);
+            // Sample the straight top section: BOTH contours must wander, and the
+            // band must have distinct thin necks and broad pools rather than a tube.
+            let mut contours = Vec::new();
+            for x in ((72. * scale) as usize..(312. * scale) as usize).step_by(4) {
+                let rows: Vec<_> = (0..(32. * scale) as usize)
+                    .filter(|&y| alpha(x, y) > 128)
+                    .collect();
+                if let (Some(outer), Some(inner)) = (rows.first(), rows.last()) {
+                    contours.push((*outer, *inner, inner - outer + 1));
+                }
+            }
+            assert!(!contours.is_empty());
+            for (label, values) in [
+                (
+                    "outer contour",
+                    contours.iter().map(|c| c.0).collect::<Vec<_>>(),
+                ),
+                ("inner contour", contours.iter().map(|c| c.1).collect()),
+                ("thickness", contours.iter().map(|c| c.2).collect()),
+            ] {
+                let variation = values.iter().max().unwrap() - values.iter().min().unwrap();
+                assert!(variation as f64 >= 2. * scale, "{label} must vary visibly");
+            }
+            let steady = frame(0., 0.);
+            let steady_next = frame(0.25, 0.);
+            assert!(
+                steady
+                    .chunks_exact(4)
+                    .zip(steady_next.chunks_exact(4))
+                    .all(|(a, b)| a[3] == b[3]),
+                "zero strength keeps both contours still"
+            );
+            // No wave can reach the image boundary, at any tested scale.
+            for x in 0..size.w as usize {
+                assert_eq!(alpha(x, 0), 0);
+                assert_eq!(alpha(x, size.h as usize - 1), 0);
+            }
+            for y in 0..size.h as usize {
+                assert_eq!(alpha(0, y), 0);
+                assert_eq!(alpha(size.w as usize - 1, y), 0);
+            }
+            // Optional frames for visual review using the actual compositor shader.
+            if scale == 1. {
+                if let Some(dir) = std::env::var_os("NIRI_RAINBOW_PREVIEW_DIR") {
+                    std::fs::create_dir_all(&dir).unwrap();
+                    for i in 0..120 {
+                        let pixels = frame(f64::from(i) / 30., 0.75);
+                        let path = std::path::Path::new(&dir).join(format!("frame-{i:03}.png"));
+                        let file = std::fs::File::create(path).unwrap();
+                        let mut encoder = png::Encoder::new(file, size.w as u32, size.h as u32);
+                        encoder.set_color(png::ColorType::Rgba);
+                        encoder.set_depth(png::BitDepth::Eight);
+                        encoder
+                            .write_header()
+                            .unwrap()
+                            .write_image_data(&pixels)
+                            .unwrap();
+                    }
+                }
+            }
+        }
     }
 }

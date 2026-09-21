@@ -1717,6 +1717,45 @@ impl<W: LayoutElement> Monitor<W> {
             || self.sticky.are_transitions_ongoing()
     }
 
+    pub(super) fn decorations_are_animating(&self, focus_ring: bool) -> bool {
+        let output_rect = Rectangle::from_size(self.view_size);
+        let zoom = self.overview_zoom();
+        let intersects = |tile: &Tile<W>, pos: Point<f64, Logical>, origin: Point<f64, Logical>| {
+            let margin = tile
+                .focus_ring()
+                .render_outset()
+                .max(tile.border().render_outset());
+            let rect = Rectangle::new(
+                origin + (pos - Point::from((margin, margin))).upscale(zoom),
+                (tile.tile_size() + Size::from((margin * 2., margin * 2.))).upscale(zoom),
+            );
+            rect.intersection(output_rect).is_some()
+        };
+        let sticky_active = self.sticky.active_window().map(|win| win.id());
+        if self
+            .sticky
+            .tiles_with_render_positions()
+            .any(|(tile, pos)| {
+                let focused = focus_ring
+                    && self.active_space == ActiveSpace::Sticky
+                    && Some(tile.window().id()) == sticky_active;
+                tile.decorations_are_animating(focused) && intersects(tile, pos, Point::default())
+            })
+        {
+            return true;
+        }
+        self.workspaces_with_render_geo().any(|(ws, geo)| {
+            let active = ws.active_window().map(|win| win.id());
+            ws.tiles_with_render_positions()
+                .any(|(tile, pos, visible)| {
+                    let focused = focus_ring && Some(tile.window().id()) == active;
+                    visible
+                        && tile.decorations_are_animating(focused)
+                        && intersects(tile, pos, geo.loc)
+                })
+        })
+    }
+
     pub fn update_render_elements(&mut self, is_active: bool) {
         let mut insert_hint_ws_geo = None;
         let insert_hint_ws_id = self

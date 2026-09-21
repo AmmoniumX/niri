@@ -6258,6 +6258,10 @@ impl Niri {
                     .any(shader_animates)
             };
 
+            let decoration_animate = !self.is_locked()
+                && !self.screenshot_ui.is_open()
+                && self.layout.decorations_are_animating(output);
+
             let state = self.output_state.get_mut(output).unwrap();
             state.unfinished_animations_remain = self.layout.are_animations_ongoing(Some(output));
             state.unfinished_animations_remain |=
@@ -6291,7 +6295,8 @@ impl Niri {
             let shader_animate = global_shader_animate
                 || region_shader_animate
                 || output_shader_animate
-                || window_shader_animate;
+                || window_shader_animate
+                || decoration_animate;
             let cap_fps = self.config.borrow().shader_animation_max_fps;
             let now = std::time::Instant::now();
 

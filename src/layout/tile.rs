@@ -1,5 +1,6 @@
 use core::f64;
 use std::rc::Rc;
+use std::time::Duration;
 
 use niri_config::utils::MergeWith as _;
 use niri_config::{Color, CornerRadius, GradientInterpolation};
@@ -478,6 +479,13 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
+        let time = if self.clock.should_complete_instantly() {
+            Duration::ZERO
+        } else {
+            self.clock.now()
+        };
+        self.focus_ring.set_animation_time(time);
+        self.border.set_animation_time(time);
         let rules = self.window.rules();
         let animated_tile_size = self.animated_tile_size();
         let expanded_progress = self.expanded_progress();
@@ -1623,6 +1631,16 @@ impl<W: LayoutElement> Tile<W> {
 
     pub fn take_unmap_snapshot(&mut self) -> Option<TileRenderSnapshot> {
         self.unmap_snapshot.take()
+    }
+
+    /// Whether a visible decoration needs another shader frame, separate from transitions
+    /// so the shader frame-rate cap also applies on an otherwise idle desktop.
+    pub fn decorations_are_animating(&self, focus_ring: bool) -> bool {
+        !self.clock.should_complete_instantly()
+            && self.clock.rate() > 0.
+            && self.expanded_progress() < 1.
+            && ((focus_ring && self.focus_ring.is_animating())
+                || (self.visual_border_width().is_some() && self.border.is_animating()))
     }
 
     pub fn border(&self) -> &FocusRing {

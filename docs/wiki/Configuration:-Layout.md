@@ -376,6 +376,45 @@ You will see it if you have multiple monitors, though.
 
 There's also a *deprecated* syntax for setting colors with four numbers representing R, G, B and A: `active-color 127 200 255 255`.
 
+#### Rainbow ripple
+
+Biri can animate the active focus ring with flowing pastel rainbow colours, uneven wax-like edges and drifting highlights:
+
+```kdl
+layout {
+    focus-ring {
+        width 6
+        rainbow-ripple speed=1.0 strength=0.75 brightness=1.0
+    }
+}
+
+// Optional: cap idle shader animation, including the focus ring.
+shader-animation-max-fps 60
+```
+
+The effect is opt-in; omitting `rainbow-ripple` preserves the normal colours and gradients.
+A bare `rainbow-ripple` uses the defaults shown above.
+
+| Property | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `enable` | `true` | `true` / `false` | Enable the effect; `false` restores configured colours and gradients. |
+| `speed` | `1.0` | 0–10 | Multiple of the default four-second cycle; `0` freezes it. |
+| `strength` | `0.75` | 0–1 | Deformation of both edges and thickness; `0` keeps the outline steady. |
+| `brightness` | `1.0` | 0–2 | Colour brightness multiplier. |
+
+The effect replaces the active colour or gradient's RGB, preserving its opacity.
+Inactive and urgent decorations keep their configured colours or gradients.
+The animated ring has a hollow centre, including behind transparent windows, and outward waves do not change window sizes.
+Widths around 6–8 logical pixels make the ripples easier to see.
+
+The same option works in `border` and in window-rule `focus-ring` / `border` blocks.
+A rule's `rainbow-ripple` replaces the complete effect settings; omitted properties use the defaults.
+Use `rainbow-ripple enable=false` in a rule to disable an inherited effect.
+
+Animation runs only while an affected decoration is on screen, stops for fully maximized/fullscreen windows, and uses `shader-animation-max-fps` alongside other animated shaders.
+With `animations { off; }`, the rainbow is static.
+Continuous animation adds idle GPU work; the frame-rate cap limits how often an otherwise idle output redraws.
+
 #### Gradients
 
 Similarly to colors, you can set `active-gradient` and `inactive-gradient`, which will take precedence.
