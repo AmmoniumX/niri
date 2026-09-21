@@ -377,6 +377,55 @@ mod tests {
     }
 
     #[test]
+    fn decoration_shader_edits_and_missing_file_recovery() -> Result {
+        const CONFIG: &str = "include \"rings/rules.kdl\"";
+        TestPath::Explicit("niri/config.kdl")
+            .setup(|sh| {
+                sh.write_file("niri/config.kdl", CONFIG)?;
+                sh.write_file(
+                    "niri/rings/rules.kdl",
+                    "window-rule { focus-ring { shader { path \"effect.frag\"; }; }; }",
+                )
+            })
+            .run(|sh, test| {
+                // The file does not exist initially. Paths in includes use the include's directory.
+                sh.write_file("niri/rings/effect.frag", "first")?;
+                test.assert_changed_to(CONFIG);
+                let first = test.watcher.path.load().config.unwrap();
+                let key = first.window_rules[0]
+                    .focus_ring
+                    .shader
+                    .as_ref()
+                    .unwrap()
+                    .key();
+                assert!(key.is_some());
+                sh.write_file("niri/rings/effect.frag", "edited")?;
+                test.assert_changed_to(CONFIG);
+                let next = test.watcher.path.load().config.unwrap();
+                assert_ne!(
+                    next.window_rules[0]
+                        .focus_ring
+                        .shader
+                        .as_ref()
+                        .unwrap()
+                        .key(),
+                    key
+                );
+                sh.remove_path("niri/rings/effect.frag")?;
+                test.assert_changed_to(CONFIG);
+                let missing = test.watcher.path.load().config.unwrap();
+                assert!(missing.window_rules[0]
+                    .focus_ring
+                    .shader
+                    .as_ref()
+                    .unwrap()
+                    .key()
+                    .is_none());
+                Ok(())
+            })
+    }
+
+    #[test]
     fn change_file() -> Result {
         TestPath::Explicit("niri/config.kdl")
             .setup(|sh| sh.write_file("niri/config.kdl", "a"))

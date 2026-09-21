@@ -526,7 +526,7 @@ impl Thumbnail {
             let loc = preview_geo.loc - padding;
 
             let mut background = self.background.borrow_mut();
-            let mut config = *background.config();
+            let mut config = background.config().clone();
             config.active_color = color;
             background.update_config(config);
             background.update_render_elements(
@@ -544,11 +544,11 @@ impl Thumbnail {
             });
 
             let mut border = self.border.borrow_mut();
-            let mut config = *border.config();
+            let mut config = border.config().clone();
             config.off = !is_active;
             config.width = round(BORDER);
             config.active_color = color;
-            border.update_config(config);
+            border.update_config(config.clone());
             border.set_thicken_corners(false);
             border.update_render_elements(
                 size,

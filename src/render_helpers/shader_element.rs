@@ -76,7 +76,13 @@ unsafe fn compile_program(
     let program = unsafe { link_program(gl, include_str!("shaders/texture.vert"), &shader)? };
     let debug_shader = format!("#version 100\n#define DEBUG_FLAGS\n{src}");
     let debug_program =
-        unsafe { link_program(gl, include_str!("shaders/texture.vert"), &debug_shader)? };
+        match unsafe { link_program(gl, include_str!("shaders/texture.vert"), &debug_shader) } {
+            Ok(program) => program,
+            Err(err) => {
+                unsafe { gl.DeleteProgram(program) };
+                return Err(err);
+            }
+        };
 
     let vert = c"vert";
     let vert_position = c"vert_position";
@@ -202,6 +208,13 @@ impl ShaderRenderElement {
             additional_uniforms,
             textures,
             kind,
+        }
+    }
+
+    pub fn set_program(&mut self, program: ProgramType) {
+        if self.program != program {
+            self.program = program;
+            self.damage_all();
         }
     }
 

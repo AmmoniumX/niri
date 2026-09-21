@@ -15,7 +15,7 @@
 > [!IMPORTANT]
 > **This is biri, a custom fork of [niri](https://github.com/niri-wm/niri).**
 >
-> It tracks upstream niri and adds a set of extra features on top: vertical scrolling for portrait outputs, GPU post-process shaders (global, per-region, and per-window), a consolidated multi-monitor carousel overview, dynamic overview zoom presets, isolated "signage" outputs, and runtime touchpad/DWT toggles.
+> It tracks upstream niri and adds a set of extra features on top: vertical scrolling for portrait outputs, GPU post-process shaders (global, per-region, and per-window), file-based animated focus-ring shaders, a consolidated multi-monitor carousel overview, dynamic overview zoom presets, isolated "signage" outputs, and runtime touchpad/DWT toggles.
 > See [Fork Features](#fork-features) below for the full list.
 >
 > Everything documented for upstream niri still applies. Bugs you hit here should be reported to this fork, not to upstream niri.
@@ -69,6 +69,30 @@ Supporting machinery:
 - Hot-reload on config reload; a shader that fails to compile logs a warning and leaves the screen rendering normally.
 
 Note the cost: an active global shader disables direct scanout and redraws the whole output every frame. The [shader documentation](./docs/wiki/Configuration:-Global-Shader.md) covers this in detail.
+
+### Custom focus-ring shaders
+
+Load a GLSL file for a focus ring or border, with a different effect for each application. Shader files reload automatically when saved; adding or changing an effect needs no compositor rebuild.
+
+Copy [`resources/shaders/focus-ring/`](./resources/shaders/focus-ring) to `~/.config/biri/focus-ring/`, then add a window rule:
+
+```kdl
+window-rule {
+    match app-id=r#"^com\.mitchellh\.ghostty$"#
+    focus-ring {
+        on
+        width 6
+        shader {
+            path "~/.config/biri/focus-ring/rainbow-ripple.frag"
+            padding 14
+        }
+    }
+}
+```
+
+The supplied rainbow shader has flowing pastel colours, uneven wax-like edges, and drifting highlights. Edit its `.frag` file to change the material, or point another window rule at `pulse.frag` or your own shader. Rings stay hollow behind transparent windows; extra drawing space from `padding` does not change window sizes. The same `shader` block works in `layout { focus-ring { ... } }` and in borders.
+
+Animation respects `shader-animation-max-fps`, and static shaders can use `animated false`. Invalid shaders log an error and fall back to configured colours. See [Custom focus-ring and border shaders](./docs/wiki/Configuration:-Layout.md#custom-focus-ring-and-border-shaders) for the shader contract, reload behaviour, and examples. The original `rainbow-ripple` configuration remains supported.
 
 ### Consolidated carousel overview
 

@@ -2127,6 +2127,19 @@ impl State {
             shaders_of(&config) != shaders_of(&old_config)
         };
 
+        // Sources are read by config parsing (also triggered by watched .frag edits).
+        // Resolved source changes are visible even when the KDL itself is unchanged.
+        if config.layout != old_config.layout
+            || config.window_rules != old_config.window_rules
+            || config.outputs != old_config.outputs
+            || config.workspaces != old_config.workspaces
+        {
+            self.backend.with_primary_renderer(|renderer| {
+                shaders::set_decoration_programs(renderer, &config);
+            });
+            shaders_changed = true;
+        }
+
         if config.region_shaders != old_config.region_shaders
             || config.window_rules != old_config.window_rules
             || config.window_shaders != old_config.window_shaders

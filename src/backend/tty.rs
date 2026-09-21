@@ -854,6 +854,7 @@ impl Tty {
             shaders::init(gles_renderer);
 
             let config = self.config.borrow();
+            shaders::set_decoration_programs(gles_renderer, &config);
             if let Some(src) = config.animations.window_resize.custom_shader.as_deref() {
                 shaders::set_custom_resize_program(gles_renderer, Some(src));
             }
