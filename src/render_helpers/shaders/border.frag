@@ -226,6 +226,7 @@ float rounded_rect_distance(vec2 coords, vec2 size, vec4 radii) {
 // Shared contract for file-based decoration shaders. Coordinates are logical pixels
 // relative to the client top-left; negative coordinates are outside the client.
 uniform float ring_width;
+uniform float emission_threshold;
 uniform float niri_time;
 #define ring_size (geo_size - vec2(border_width * 2.0))
 #define ring_radius max(outer_radius - vec4(border_width), vec4(0.0))
@@ -287,6 +288,11 @@ void main() {
 #endif
 
     color = color * niri_alpha;
+    if (emission_threshold >= 0.0) {
+        float peak = max(color.r, max(color.g, color.b));
+        float emission = smoothstep(emission_threshold, max(emission_threshold + 0.001, 1.0), peak);
+        color *= emission;
+    }
 
 #if defined(DEBUG_FLAGS)
     if (niri_tint == 1.0)

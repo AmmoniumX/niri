@@ -12,7 +12,7 @@ files are plain fragment shader sources referenced by `path` from window rules.
 | `cursor/` | Full `global-shader {}` blocks: effects that follow the mouse (glow, comet, trail, ripple, spotlight, …). See the note on `cursor-radius` below. | `include` + symlink cycle (below) |
 | `screen/` | Full `global-shader {}` blocks: whole-output colour grades (CRT, grayscale, vignette, warm tint). | same cycle, `screen` group |
 | `close/` | `animations { window-open {} window-close {} }` blocks: a matched open/close pair per effect (whirlpool, melt, ripple, lightning). Each file **owns both nodes** — including it overrides any `window-open`/`window-close` set earlier in `config.kdl`. Nothing else in `animations` is touched. | `include "shaders/current.kdl"` + `scripts/shader-cycle` |
-| `focus-ring/` | Editable focus-ring GLSL (wax-like rainbow and cyan pulse), plus a rainbow preset. | `focus-ring { shader { path "…"; } }` or `include` |
+| `focus-ring/` | Editable focus-ring GLSL (wax-like rainbow, cyan pulse, and travelling lightning), plus a rainbow preset. | `focus-ring { shader { path "…"; } }` or `include` |
 | `window/` | Per-window `.frag` sources for `shader {}` in window rules (CRT, parchment, pixel mosaic, fisheye + RGB split, text-legibility for transparent terminals, shimmer, ripple drops, Rorschach ink, mercury sheen). | `window-rule { shader { path "…" } }` |
 | `off.kdl` | No-op — linking `current.kdl` here disables the global shader. | |
 | `scripts/` | The cycle scripts the includes/binds below rely on. They expect the bundle copied to `~/.config/biri/` (override with `$BIRI_CONFIG_DIR`). | |
@@ -21,7 +21,7 @@ files are plain fragment shader sources referenced by `path` from window rules.
 
 Copy the entire `focus-ring/` directory to your config directory. Include `focus-ring/rainbow-ripple.kdl` for a global ring, or assign its `.frag` files to individual applications through `window-rule { focus-ring { on; shader { path "focus-ring/rainbow-ripple.frag"; padding 14; }; }; }`. Paths resolve relative to the containing config/include. Saving a shader reloads it automatically; no rebuild is needed. `pulse.frag` is a simpler second effect requiring no extra padding.
 
-See [the decoration shader contract](../../docs/wiki/Configuration:-Layout.md#custom-focus-ring-and-border-shaders). These shaders draw the ring only and do not have the global shaders' full-screen or capture restrictions.
+See [the decoration shader contract](../../docs/wiki/Configuration:-Layout.md#custom-focus-ring-and-border-shaders). These shaders do not have the global shaders' full-screen or capture restrictions. Add `light spread=80 intensity=1.0 threshold=0.5` inside a decoration's `shader` block to spill its bright highlights onto nearby window content. `lightning.frag` uses a travelling blue-white pulse; at width 6, use `padding 24`. The same opt-in lighting works with your existing shader files and reloads from the config without rebuilding.
 
 ### `cursor-radius` and full-output cost
 

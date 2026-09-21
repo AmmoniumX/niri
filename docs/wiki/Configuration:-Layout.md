@@ -380,7 +380,7 @@ There's also a *deprecated* syntax for setting colors with four numbers represen
 
 Biri can load a separate GLSL file for each application's active focus ring or border. No rebuild is needed to add or edit shader effects once the compositor supports this feature.
 
-Copy the `resources/shaders/focus-ring/` directory from this repository to `~/.config/biri/focus-ring/`. This example uses the wax-like rainbow effect on Ghostty and a simpler cyan pulse on Firefox:
+Copy the `resources/shaders/focus-ring/` directory from this repository to `~/.config/niri/focus-ring/`. This example uses the wax-like rainbow effect on Ghostty and a simpler cyan pulse on Firefox:
 
 ```kdl
 window-rule {
@@ -389,7 +389,7 @@ window-rule {
         on
         width 6
         shader {
-            path "~/.config/biri/focus-ring/rainbow-ripple.frag"
+            path "~/.config/niri/focus-ring/rainbow-ripple.frag"
             padding 14
         }
     }
@@ -400,7 +400,7 @@ window-rule {
         on
         width 4
         shader {
-            path "~/.config/biri/focus-ring/pulse.frag"
+            path "~/.config/niri/focus-ring/pulse.frag"
             speed 0.5
         }
     }
@@ -417,10 +417,45 @@ A `shader` block also works in the global layout, output/workspace layouts, and 
 | `animated` | `true` | Use `false` for a static shader: time stays zero and it requests no animation frames. |
 | `speed` | `1.0` | Time multiplier, 0–10; zero freezes at time zero. |
 | `padding` | `0` | Extra drawing space beyond the nominal ring width, 0–1024 logical pixels. Reserve enough for outward deformations; it does not affect window layout. |
+| `light` | absent (off) | Optional light spill from bright ring pixels; see below. |
 
 **Reloading:** shader files are watched along with the config (checked every 500 ms), including files referenced from includes. Saving a `.frag` file reloads it even if the KDL is unchanged. You can also force a reload with `niri msg action load-config-file`. Missing files and GLSL compilation errors are logged and fall back to configured colours; fixing the file restores the shader automatically. Other windows keep their own shaders.
 
 Effects apply to active decorations; inactive and urgent decorations retain their configured colours/gradients. Animation follows `shader-animation-max-fps` and stops when decorations are hidden or suppressed by fullscreen/maximized windows. `animations { off; }` freezes shader time. Continuous animation adds idle GPU work.
+
+##### Light spilling onto windows
+
+Add `light` to an existing file-based or inline decoration shader to illuminate the focused window and neighbouring windows. The bundled `lightning.frag` has a travelling blue-white pulse; its bright head supplies the light automatically. Existing shaders need no new GLSL function or uniforms.
+
+```kdl
+window-rule {
+    match app-id="^foot$"
+    focus-ring {
+        on
+        width 6
+        shader {
+            path "~/.config/niri/focus-ring/lightning.frag"
+            padding 24
+            light spread=80 intensity=1.0 threshold=0.5
+        }
+    }
+}
+```
+
+A bare `light` uses the defaults above. These are properties on the `light` node:
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `enable` | `true` | Set `false` to disable spill while retaining the ring. |
+| `spread` | `80` | Glow spread in logical pixels, 1–256. The soft tail extends beyond this nominal distance. |
+| `intensity` | `1.0` | Brightness multiplier, 0–4. Zero disables spill. |
+| `threshold` | `0.5` | Brightness cutoff, 0–1, measured from the brightest premultiplied RGB channel after ring opacity. Lower it to include dimmer areas; raise it to isolate highlights. |
+
+Saving the config updates these settings immediately. The compositor extracts the ring's bright pixels at the same animation time, diffuses them, and screen-blends the resulting colour over window content. This produces bloom and local illumination, without ray tracing, reflections, occlusion shadows, or access to a window texture from the shader. The ring itself remains hollow; the separate light layer can extend inward and outward. `padding` still controls ring geometry independently of the light's spread.
+
+Light is drawn above window content, including floating and sticky windows, following the existing scene order relative to shell surfaces and compositor overlays. In the normal desktop view it stays below top/overlay shell surfaces. It follows the window during movement and overview scaling. Fully expanded/fullscreen decorations, inactive/urgent rings, and invalid shaders do not emit light. Spill is suppressed during window-opening transforms and is not baked into closing snapshots. Output captures include it through the normal decoration path; isolated window captures do not include this scene lighting.
+
+Lighting is opt-in and adds a half-resolution emission pass plus blur passes for each visible lit decoration. Static emission reuses its blurred texture; animated effects follow the existing shader frame cap. Wider spread and larger windows require more texture memory and GPU work. Float blur textures avoid banding where supported, with lower-precision fallbacks for other drivers.
 
 ##### Writing a shader
 
