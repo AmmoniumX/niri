@@ -194,8 +194,12 @@ impl<W: LayoutElement> Tile<W> {
         options: Rc<Options>,
     ) -> Self {
         let rules = window.rules();
-        let border_config = options.layout.border.merged_with(&rules.border);
-        let focus_ring_config = options.layout.focus_ring.merged_with(&rules.focus_ring);
+        let border_config = options.layout.border.clone().merged_with(&rules.border);
+        let focus_ring_config = options
+            .layout
+            .focus_ring
+            .clone()
+            .merged_with(&rules.focus_ring);
         let shadow_config = options.layout.shadow.merged_with(&rules.shadow);
         let sizing_mode = window.sizing_mode();
 
@@ -249,7 +253,12 @@ impl<W: LayoutElement> Tile<W> {
 
         let rules = self.window.rules();
 
-        let mut border_config = self.options.layout.border.merged_with(&rules.border);
+        let mut border_config = self
+            .options
+            .layout
+            .border
+            .clone()
+            .merged_with(&rules.border);
         border_config.width = round_max1(border_config.width);
         self.border.update_config(border_config.into());
 
@@ -257,6 +266,7 @@ impl<W: LayoutElement> Tile<W> {
             .options
             .layout
             .focus_ring
+            .clone()
             .merged_with(&rules.focus_ring);
         focus_ring_config.width = round_max1(focus_ring_config.width);
         self.focus_ring.update_config(focus_ring_config);
@@ -399,7 +409,12 @@ impl<W: LayoutElement> Tile<W> {
         let round_max1 = |logical| round_logical_in_physical_max1(self.scale, logical);
 
         let rules = self.window.rules();
-        let mut border_config = self.options.layout.border.merged_with(&rules.border);
+        let mut border_config = self
+            .options
+            .layout
+            .border
+            .clone()
+            .merged_with(&rules.border);
         border_config.width = round_max1(border_config.width);
         self.border.update_config(border_config.into());
 
@@ -407,6 +422,7 @@ impl<W: LayoutElement> Tile<W> {
             .options
             .layout
             .focus_ring
+            .clone()
             .merged_with(&rules.focus_ring);
         focus_ring_config.width = round_max1(focus_ring_config.width);
         self.focus_ring.update_config(focus_ring_config);

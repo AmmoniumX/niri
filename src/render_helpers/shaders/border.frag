@@ -223,68 +223,50 @@ float rounded_rect_distance(vec2 coords, vec2 size, vec4 radii) {
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
-// Uneven periodic fields rather than equally spaced waves. Warping the sampling
-// coordinate makes the lobes bunch up and stretch; all frequencies stay integral
-// so the perimeter seam and the four-second animation loop remain continuous.
-float wax_field(float u, float phase) {
-    const float tau = 6.28318530718;
-    return 0.46 * sin(tau * (3.0 * u - phase) + 0.7)
-        + 0.28 * sin(tau * (7.0 * u + 2.0 * phase) + 2.1)
-        + 0.17 * sin(tau * (11.0 * u - 2.0 * phase) + 4.4)
-        + 0.09 * sin(tau * (19.0 * u + 3.0 * phase) + 1.3);
+// Shared contract for file-based decoration shaders. Coordinates are logical pixels
+// relative to the client top-left; negative coordinates are outside the client.
+uniform float ring_width;
+uniform float niri_time;
+#define ring_size (geo_size - vec2(border_width * 2.0))
+#define ring_radius max(outer_radius - vec4(border_width), vec4(0.0))
+#define ring_padding (border_width - ring_width)
+
+float ring_distance(vec2 coords) {
+    return rounded_rect_distance(coords, ring_size, ring_radius);
 }
 
-vec4 rainbow_color(vec2 coords) {
-    const float tau = 6.28318530718;
-    float phase = rainbow_ripple.x;
-    float strength = rainbow_ripple.y;
-    float width = rainbow_ripple.w;
-    float padding = border_width - width;
-    vec2 nominal_size = geo_size - vec2(padding * 2.0);
-    vec2 p = (coords - geo_size * 0.5) / max(nominal_size * 0.5, vec2(1.0));
-    float u = atan(p.y, p.x) / tau;
-    float drift = u + 0.045 * wax_field(u + 0.13, phase);
-    float bend = wax_field(drift, phase);
-    float fine = wax_field(drift * 2.0 + 0.31, phase + 0.21);
-    float pool = smoothstep(-0.65, 0.65, wax_field(drift + 0.43, phase + 0.37));
+vec4 ring_base_color(vec2 coords) {
+    return unpremul_rect(gradient_color(coords + vec2(border_width)));
+}
 
-    // Both contours wander. Keep the inner edge outside the client, while the outer
-    // one swells into broad pools joined by thin necks. Max outward reach is
-    // width * (1 + 2.07 * strength), within FocusRing's reserved envelope.
-    float inner_edge = width * strength * max(0.0, 0.40 + 0.34 * bend + 0.20 * fine);
-    float thickness = width * mix(1.0, 0.28 + 1.65 * pool + 0.20 * fine, strength);
-    float outer_edge = inner_edge + thickness;
-    vec2 inner_size = geo_size - vec2(border_width * 2.0);
-    vec4 inner_radius = max(outer_radius - vec4(border_width), 0.0);
-    float distance = rounded_rect_distance(coords - border_width, inner_size, inner_radius);
-    float half_px = 0.5 / niri_scale;
-    float coverage = smoothstep(inner_edge - half_px, inner_edge + half_px, distance)
-        * (1.0 - smoothstep(outer_edge - half_px, outer_edge + half_px, distance));
+vec4 ring_color(vec2 coords);
 
-    // Swirled pastel pigment and narrow, broken highlights give the pools a waxy
-    // surface. The highlight meanders across the band instead of whitening its
-    // entire cross-section like a light travelling through a tube.
-    float across = clamp((distance - inner_edge) / max(thickness, 0.01), 0.0, 1.0);
-    float pigment = u - phase + 0.10 * bend + 0.025 * fine
-        + 0.025 * sin(tau * (across * 0.65 + drift * 8.0 + phase));
-    vec3 hue = clamp(abs(fract(pigment + vec3(0.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-    float milk = clamp(0.30 + 0.18 * bend + 0.12 * pool, 0.12, 0.62);
-    vec3 rgb = mix(hue, vec3(1.0), milk);
-    float ridge = 0.48 + 0.18 * fine;
-    float sheen = exp(-pow((across - ridge) / 0.17, 2.0))
-        * smoothstep(0.30, 0.85, pool) * (0.65 + 0.35 * bend);
-    rgb = mix(rgb, vec3(1.0), 0.8 * sheen);
-    rgb *= 0.90 + 0.10 * sin(tau * (across * 0.5 + 0.1 * bend));
-    rgb = clamp(rgb * rainbow_ripple.z, 0.0, 1.0);
-    float alpha = coverage * gradient_color(coords).a;
-    return vec4(rgb * alpha, alpha);
+vec4 custom_ring_color(vec2 coords) {
+    vec4 color = ring_color(coords);
+    color.a = clamp(color.a, 0.0, 1.0) * ring_base_color(coords).a;
+    // Custom code can shape the outer silhouette but cannot paint over the client.
+    if (all(greaterThanEqual(coords, vec2(0.0))) && all(lessThanEqual(coords, ring_size))) {
+        color.a *= 1.0 - niri_rounding_alpha(coords, ring_size, ring_radius);
+    }
+    return premul_rect(color);
 }
 
 void main() {
     vec3 coords_geo = input_to_geo * vec3(niri_v_coords, 1.0);
     vec4 color;
+#ifdef CUSTOM_DECORATION
+    color = custom_ring_color(coords_geo.xy - vec2(border_width));
+#else
     if (rainbow_ripple.w > 0.0) {
-        color = rainbow_color(coords_geo.xy);
+        color = custom_ring_color(coords_geo.xy - vec2(border_width));
+    } else if (ring_width > 0.0) {
+        // Missing/invalid custom program: retain a normal ring at its nominal width,
+        // even though the draw geometry includes the custom shader's padding.
+        float distance = ring_distance(coords_geo.xy - vec2(border_width));
+        float half_px = 0.5 / niri_scale;
+        float coverage = smoothstep(-half_px, half_px, distance)
+            * (1.0 - smoothstep(ring_width - half_px, ring_width + half_px, distance));
+        color = gradient_color(coords_geo.xy) * coverage;
     } else {
         color = gradient_color(coords_geo.xy);
         color = color * niri_rounding_alpha(coords_geo.xy, geo_size, outer_radius);
@@ -301,6 +283,8 @@ void main() {
         }
 
     }
+
+#endif
 
     color = color * niri_alpha;
 

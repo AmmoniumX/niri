@@ -7402,8 +7402,23 @@ fn vertical_main_axis_drag_keeps_physical_pointer_anchor() {
 
 #[test]
 fn rainbow_ripple_redraw_visibility() {
+    decoration_redraw_visibility(false);
+}
+
+#[test]
+fn custom_decoration_redraw_visibility() {
+    decoration_redraw_visibility(true);
+}
+
+fn decoration_redraw_visibility(custom: bool) {
     let mut options = Options::default();
-    options.layout.focus_ring.rainbow_ripple = Some(Default::default());
+    if custom {
+        options.layout.focus_ring.shader = niri_config::Config::parse_mem(
+            r#"layout { focus-ring { shader { source "vec4 ring_color(vec2 p) { return vec4(1.); }"; }; }; }"#,
+        ).unwrap().layout.focus_ring.shader;
+    } else {
+        options.layout.focus_ring.rainbow_ripple = Some(Default::default());
+    }
     let mut layout = check_ops_with_options(
         options,
         [
@@ -7470,14 +7485,18 @@ fn rainbow_ripple_redraw_visibility() {
     assert!(layout.decorations_are_animating(&output));
 
     let mut options = (*layout.options).clone();
-    options
-        .layout
-        .focus_ring
-        .rainbow_ripple
-        .as_mut()
-        .unwrap()
-        .speed
-        .0 = 0.;
+    if custom {
+        options.layout.focus_ring.shader.as_mut().unwrap().speed.0 = 0.;
+    } else {
+        options
+            .layout
+            .focus_ring
+            .rainbow_ripple
+            .as_mut()
+            .unwrap()
+            .speed
+            .0 = 0.;
+    }
     layout.update_options(options);
     layout.update_render_elements(Some(&output));
     assert!(

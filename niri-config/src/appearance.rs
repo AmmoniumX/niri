@@ -253,7 +253,7 @@ impl Default for RainbowRipple {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FocusRing {
     pub off: bool,
     pub width: f64,
@@ -264,6 +264,7 @@ pub struct FocusRing {
     pub inactive_gradient: Option<Gradient>,
     pub urgent_gradient: Option<Gradient>,
     pub rainbow_ripple: Option<RainbowRipple>,
+    pub shader: Option<crate::decoration_shader::DecorationShader>,
 }
 
 impl Default for FocusRing {
@@ -278,11 +279,12 @@ impl Default for FocusRing {
             inactive_gradient: None,
             urgent_gradient: None,
             rainbow_ripple: None,
+            shader: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Border {
     pub off: bool,
     pub width: f64,
@@ -293,6 +295,7 @@ pub struct Border {
     pub inactive_gradient: Option<Gradient>,
     pub urgent_gradient: Option<Gradient>,
     pub rainbow_ripple: Option<RainbowRipple>,
+    pub shader: Option<crate::decoration_shader::DecorationShader>,
 }
 
 impl Default for Border {
@@ -307,6 +310,7 @@ impl Default for Border {
             inactive_gradient: None,
             urgent_gradient: None,
             rainbow_ripple: None,
+            shader: None,
         }
     }
 }
@@ -323,6 +327,7 @@ impl From<Border> for FocusRing {
             inactive_gradient: value.inactive_gradient,
             urgent_gradient: value.urgent_gradient,
             rainbow_ripple: value.rainbow_ripple,
+            shader: value.shader,
         }
     }
 }
@@ -339,6 +344,7 @@ impl From<FocusRing> for Border {
             inactive_gradient: value.inactive_gradient,
             urgent_gradient: value.urgent_gradient,
             rainbow_ripple: value.rainbow_ripple,
+            shader: value.shader,
         }
     }
 }
@@ -351,7 +357,7 @@ impl MergeWith<BorderRule> for Border {
         }
 
         merge!((self, part), width);
-        merge_clone_opt!((self, part), rainbow_ripple);
+        merge_clone_opt!((self, part), rainbow_ripple, shader);
 
         merge_color_gradient!(
             (self, part),
@@ -364,7 +370,7 @@ impl MergeWith<BorderRule> for Border {
 
 impl MergeWith<BorderRule> for FocusRing {
     fn merge_with(&mut self, part: &BorderRule) {
-        let mut x = Border::from(*self);
+        let mut x = Border::from(self.clone());
         x.merge_with(part);
         *self = FocusRing::from(x);
     }
@@ -654,7 +660,7 @@ pub enum BlockOutFrom {
     ScreenCapture,
 }
 
-#[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
 pub struct BorderRule {
     #[knuffel(child)]
     pub off: bool,
@@ -676,6 +682,8 @@ pub struct BorderRule {
     pub urgent_gradient: Option<Gradient>,
     #[knuffel(child)]
     pub rainbow_ripple: Option<RainbowRipple>,
+    #[knuffel(child)]
+    pub shader: Option<crate::decoration_shader::DecorationShader>,
 }
 
 #[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
@@ -718,7 +726,7 @@ impl MergeWith<Self> for BorderRule {
     fn merge_with(&mut self, part: &Self) {
         merge_on_off!((self, part));
 
-        merge_clone_opt!((self, part), width, rainbow_ripple);
+        merge_clone_opt!((self, part), width, rainbow_ripple, shader);
 
         merge_color_gradient_opt!(
             (self, part),

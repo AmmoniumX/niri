@@ -29,6 +29,8 @@ pub struct BorderRenderElement {
     inner: ShaderRenderElement,
     params: Parameters,
     rainbow_ripple: [f32; 4],
+    shader_time: f32,
+    ring_width: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -66,6 +68,8 @@ impl BorderRenderElement {
         let mut rv = Self {
             inner,
             rainbow_ripple: [0.; 4],
+            shader_time: 0.,
+            ring_width: 0.,
             params: Parameters {
                 size,
                 gradient_area,
@@ -89,6 +93,8 @@ impl BorderRenderElement {
         Self {
             inner,
             rainbow_ripple: [0.; 4],
+            shader_time: 0.,
+            ring_width: 0.,
             params: Parameters {
                 size: Default::default(),
                 gradient_area: Default::default(),
@@ -149,6 +155,16 @@ impl BorderRenderElement {
     pub fn set_rainbow_ripple(&mut self, effect: [f32; 4]) {
         if self.rainbow_ripple != effect {
             self.rainbow_ripple = effect;
+            self.update_inner();
+        }
+    }
+
+    pub fn set_shader(&mut self, key: Option<u64>, time: f32, width: f32) {
+        self.inner
+            .set_program(key.map_or(ProgramType::Border, ProgramType::Decoration));
+        if self.shader_time != time || self.ring_width != width {
+            self.shader_time = time;
+            self.ring_width = width;
             self.update_inner();
         }
     }
@@ -225,6 +241,8 @@ impl BorderRenderElement {
                 Uniform::new("outer_radius", <[f32; 4]>::from(corner_radius)),
                 Uniform::new("border_width", border_width),
                 Uniform::new("rainbow_ripple", self.rainbow_ripple),
+                Uniform::new("niri_time", self.shader_time),
+                Uniform::new("ring_width", self.ring_width),
             ]),
             HashMap::new(),
         );

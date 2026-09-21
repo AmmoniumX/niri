@@ -823,6 +823,8 @@ These rules have the same options as the normal [`focus-ring` and `border` confi
 However, in addition to `off` to disable the border/focus ring, this window rule has an `on` flag that enables the border/focus ring for the window even if it was otherwise disabled.
 The `on` flag has precedence over the `off` flag, in case both are set.
 
+Biri also supports a per-window `shader { path "effect.frag"; }` inside either block. Different applications can use different files, and saving a shader reloads it without rebuilding. See [Custom focus-ring and border shaders](./Configuration:-Layout.md#custom-focus-ring-and-border-shaders) for examples and the GLSL contract.
+
 ```kdl
 window-rule {
     focus-ring {

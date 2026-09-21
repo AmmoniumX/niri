@@ -1,13 +1,13 @@
 ---
 name: converting-global-shaders
-description: Use when porting Shadertoy or Hyprland shaders to biri/niri global-shader, writing cursor or post-process effects, or creating and tuning focus-ring and border shaders. Covers the global shader contract and the built-in decoration shader workflow with GPU previews.
+description: Use when porting Shadertoy or Hyprland shaders to biri/niri global-shader, writing cursor or post-process effects, or creating and tuning focus-ring and border shaders. Covers the global shader contract and the file-based decoration shader workflow with GPU previews.
 ---
 
 # Authoring Shaders for biri
 
 ## Choose the rendering path
 
-- **Focus rings and window borders:** read [references/focus-rings.md](references/focus-rings.md). These use the built-in border shader; they do not accept a `global_color()` function or a custom `path` in `focus-ring`. The guide covers configuration, shader development, animated geometry, and previews rendered by the compositor's actual shader.
+- **Focus rings and window borders:** read [references/focus-rings.md](references/focus-rings.md). These accept a `shader { path "effect.frag"; }` block inside `focus-ring` or `border`, globally or per window. Write `vec4 ring_color(vec2 coords)`, not `global_color()`. Files reload automatically when saved; new effects do not require rebuilding. The guide covers the contract, animated geometry, and GPU previews.
 - **Global, cursor, and screen post-process effects:** use the sections below. Their coordinate contract and capture/backend limitations are specific to global shaders; do not apply them to focus-ring rendering.
 
 Repository paths in this skill are relative to the biri checkout. Match an effect to the user's reference and requested material; wax-like deformation is one supported example, not a required style for every ring.

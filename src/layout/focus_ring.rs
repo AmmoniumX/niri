@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::iter::zip;
 use std::time::Duration;
 
@@ -23,6 +24,8 @@ pub struct FocusRing {
     thicken_corners: bool,
     animation_time: Duration,
     animating: bool,
+    custom_key: Option<u64>,
+    custom_shader_available: Cell<bool>,
 }
 
 niri_render_elements! {
@@ -46,6 +49,8 @@ impl FocusRing {
             thicken_corners: true,
             animation_time: Duration::ZERO,
             animating: false,
+            custom_key: None,
+            custom_shader_available: Cell::new(true),
         }
     }
 
@@ -58,7 +63,7 @@ impl FocusRing {
     }
 
     pub fn is_animating(&self) -> bool {
-        self.animating
+        self.animating && (self.custom_key.is_none() || self.custom_shader_available.get())
     }
 
     pub fn update_shaders(&mut self) {
@@ -79,15 +84,33 @@ impl FocusRing {
         scale: f64,
         alpha: f32,
     ) {
-        let effect = self.config.rainbow_ripple.filter(|effect| {
-            effect.enable
-                && is_active
-                && !is_urgent
-                && !self.config.off
-                && self.config.width > 0.
-                && alpha > 0.
+        let enabled =
+            is_active && !is_urgent && !self.config.off && self.config.width > 0. && alpha > 0.;
+        let custom = self
+            .config
+            .shader
+            .as_ref()
+            .filter(|shader| enabled && shader.key().is_some());
+        // An explicit shader block, including enable=false, overrides the legacy effect.
+        let effect = self
+            .config
+            .rainbow_ripple
+            .filter(|effect| effect.enable && enabled && self.config.shader.is_none());
+        self.animating = effect.is_some_and(|effect| effect.speed.0 > 0.)
+            || custom.is_some_and(|shader| shader.animated && shader.speed.0 > 0.);
+        let custom_key = custom.and_then(|shader| shader.key());
+        if self.custom_key != custom_key {
+            self.custom_key = custom_key;
+            self.custom_shader_available.set(true);
+        }
+        let custom_time = custom.map_or(0., |shader| {
+            if shader.animated {
+                (self.animation_time.as_secs_f64() * shader.speed.0) as f32
+            } else {
+                0.
+            }
         });
-        self.animating = effect.is_some_and(|effect| effect.speed.0 > 0.);
+        let has_effect = effect.is_some() || custom.is_some();
         let ripple = effect.map_or([0.; 4], |effect| {
             // Reduce in f64 before sending to the GPU to retain precision on long uptimes.
             let phase = (self.animation_time.as_secs_f64() * effect.speed.0 / 4.).rem_euclid(1.);
@@ -99,13 +122,18 @@ impl FocusRing {
             ]
         });
         // Reserve a fixed envelope for the waves; the window and its layout never move.
-        let padding = effect.map_or(0., |effect| {
-            (self.config.width * effect.strength.0 * 2.2 * scale + 1.).ceil() / scale
-        });
+        let padding = custom.map_or_else(
+            || {
+                effect.map_or(0., |effect| {
+                    (self.config.width * effect.strength.0 * 2.2 * scale + 1.).ceil() / scale
+                })
+            },
+            |shader| (shader.padding.0 * scale + 1.).ceil() / scale,
+        );
         let width = self.config.width + padding;
         let radius = radius.expanded_by(padding as f32);
         // The animated decoration is always hollow, including behind translucent clients.
-        let is_border = is_border || effect.is_some();
+        let is_border = is_border || has_effect;
         self.full_size = win_size + Size::from((width, width)).upscale(2.);
         self.is_border = is_border;
 
@@ -134,7 +162,7 @@ impl FocusRing {
         self.animating &= gradient.map_or(color.a > 0., |g| g.from.a > 0. || g.to.a > 0.);
 
         self.use_border_shader =
-            effect.is_some() || radius != CornerRadius::default() || gradient.is_some();
+            has_effect || radius != CornerRadius::default() || gradient.is_some();
 
         // Set the defaults for solid color + rounded corners.
         let gradient = gradient.unwrap_or_else(|| Gradient::from(color));
@@ -148,7 +176,7 @@ impl FocusRing {
         let rounded_corner_border_width = if is_border {
             // HACK: increase the border width used for the inner rounded corners a tiny bit to
             // reduce background bleed.
-            let extra = if self.thicken_corners && effect.is_none() {
+            let extra = if self.thicken_corners && !has_effect {
                 0.5
             } else {
                 0.
@@ -261,6 +289,15 @@ impl FocusRing {
         }
         for border in &mut self.borders {
             border.set_rainbow_ripple(ripple);
+            border.set_shader(
+                custom_key,
+                custom_time,
+                if has_effect {
+                    self.config.width as f32
+                } else {
+                    0.
+                },
+            );
         }
     }
 
@@ -281,6 +318,14 @@ impl FocusRing {
             return;
         }
 
+        if let Some(key) = self.custom_key {
+            self.custom_shader_available.set(
+                crate::render_helpers::shaders::Shaders::get(renderer)
+                    .decorations
+                    .borrow()
+                    .contains_key(&key),
+            );
+        }
         let has_border_shader = BorderRenderElement::has_shader(renderer);
 
         let mut push = |buffer, border: &BorderRenderElement, location: Point<f64, Logical>| {
@@ -388,6 +433,178 @@ mod tests {
         update(&mut ring, true, false, 1.);
         assert!(!ring.is_animating());
     }
+    #[test]
+    fn egl_decoration_files_reload_independently() {
+        use niri_config::utils::MergeWith;
+        use smithay::backend::allocator::Fourcc;
+        use smithay::backend::egl::native::EGLSurfacelessDisplay;
+        use smithay::backend::egl::{EGLContext, EGLDisplay};
+        use smithay::backend::renderer::gles::GlesRenderer;
+        use smithay::utils::Transform;
+
+        use crate::render_helpers::{render_to_vec, shaders};
+
+        let sh = xshell::Shell::new().unwrap();
+        let dir = sh.create_temp_dir().unwrap();
+        let file = dir.path().join("first.frag");
+        let config_path = dir.path().join("config.kdl");
+        let red = "vec4 ring_color(vec2 p) { return vec4(1., 0., 0., 1.); }";
+        let blue = "vec4 ring_color(vec2 p) { return vec4(0., 0., 1., 1.); }";
+        sh.write_file(&file, red).unwrap();
+        sh.write_file(
+            dir.path().join("second.frag"),
+            "vec4 ring_color(vec2 p) { return vec4(0., 1., 0., 1.); }",
+        )
+        .unwrap();
+        sh.write_file(&config_path, r#"
+            layout { focus-ring { width 8; active-color "white"; }; }
+            window-rule { match app-id="first"; focus-ring { shader { path "first.frag"; padding 13.2; }; }; }
+            window-rule { match app-id="second"; focus-ring { shader { path "second.frag"; }; }; }
+        "#).unwrap();
+        let load = || niri_config::Config::load(&config_path).config.unwrap();
+        let mut renderer = unsafe {
+            let display = EGLDisplay::new(EGLSurfacelessDisplay).unwrap();
+            let context = EGLContext::new(&display).unwrap();
+            GlesRenderer::new(context).unwrap()
+        };
+        crate::render_helpers::resources::init(&mut renderer);
+        shaders::init(&mut renderer);
+        let draw =
+            |renderer: &mut GlesRenderer, config: niri_config::FocusRing, time, scale: f64| {
+                let mut ring = FocusRing::new(config);
+                ring.set_animation_time(Duration::from_secs_f64(time));
+                ring.update_render_elements(
+                    (320., 180.).into(),
+                    true,
+                    false,
+                    false,
+                    Rectangle::from_size((384., 244.).into()),
+                    CornerRadius {
+                        top_left: 24.,
+                        top_right: 12.,
+                        bottom_right: 0.,
+                        bottom_left: 36.,
+                    },
+                    scale,
+                    1.,
+                );
+                let mut elements = Vec::new();
+                ring.render(renderer, (32., 32.).into(), &mut |e| elements.push(e));
+                let pixels = render_to_vec(
+                    renderer,
+                    ((384. * scale) as i32, (244. * scale) as i32).into(),
+                    scale.into(),
+                    Transform::Normal,
+                    Fourcc::Abgr8888,
+                    elements.into_iter(),
+                )
+                .unwrap();
+                (pixels, ring.is_animating())
+            };
+        let first = |config: &niri_config::Config| {
+            config
+                .layout
+                .focus_ring
+                .clone()
+                .merged_with(&config.window_rules[0].focus_ring)
+        };
+        let second = |config: &niri_config::Config| {
+            config
+                .layout
+                .focus_ring
+                .clone()
+                .merged_with(&config.window_rules[1].focus_ring)
+        };
+        let top_pixel =
+            |pixels: &[u8]| pixels[(26 * 384 + 160) * 4..(26 * 384 + 160) * 4 + 4].to_vec();
+        let config = load();
+        shaders::set_decoration_programs(&mut renderer, &config);
+        let (pixels, _) = draw(&mut renderer, first(&config), 0., 1.);
+        assert_eq!(top_pixel(&pixels), [255, 0, 0, 255]);
+        assert_eq!(
+            &pixels[(100 * 384 + 160) * 4..(100 * 384 + 160) * 4 + 4],
+            [0; 4],
+            "even a solid user shader must leave the client hollow"
+        );
+        let green = draw(&mut renderer, second(&config), 0., 1.).0;
+        assert_eq!(top_pixel(&green), [0, 255, 0, 255]);
+        let old_key = first(&config).shader.unwrap().key().unwrap();
+
+        // Same path and unchanged KDL: the resolved contents select a new GPU program.
+        sh.write_file(&file, blue).unwrap();
+        let config = load();
+        shaders::set_decoration_programs(&mut renderer, &config);
+        assert!(!shaders::Shaders::get(&mut renderer)
+            .decorations
+            .borrow()
+            .contains_key(&old_key));
+        assert_eq!(
+            top_pixel(&draw(&mut renderer, first(&config), 0., 1.).0),
+            [0, 0, 255, 255]
+        );
+        assert_eq!(draw(&mut renderer, second(&config), 0., 1.).0, green);
+
+        sh.write_file(&file, "this is invalid GLSL").unwrap();
+        let config = load();
+        shaders::set_decoration_programs(&mut renderer, &config);
+        let (fallback, animating) = draw(&mut renderer, first(&config), 0., 1.);
+        assert_eq!(
+            top_pixel(&fallback),
+            [255; 4],
+            "failed shader falls back to configured colour"
+        );
+        assert!(
+            !animating,
+            "a failed shader should not keep scheduling frames"
+        );
+        assert_eq!(draw(&mut renderer, second(&config), 0., 1.).0, green);
+        assert_eq!(
+            shaders::Shaders::get(&mut renderer)
+                .decorations
+                .borrow()
+                .len(),
+            1
+        );
+
+        // The editable file and compatibility shorthand must render the same wax effect.
+        sh.write_file(
+            &file,
+            include_str!("../../resources/shaders/focus-ring/rainbow-ripple.frag"),
+        )
+        .unwrap();
+        let config = load();
+        shaders::set_decoration_programs(&mut renderer, &config);
+        for scale in [1., 1.25, 2.] {
+            let mut legacy = config.layout.focus_ring.clone();
+            legacy.rainbow_ripple = Some(Default::default());
+            for time in [0., 0.25, 4.] {
+                assert_eq!(
+                    draw(&mut renderer, first(&config), time, scale).0,
+                    draw(&mut renderer, legacy.clone(), time, scale).0,
+                    "external wax must match at scale {scale}, time {time}"
+                );
+            }
+        }
+        let mut frozen = first(&config);
+        frozen.shader.as_mut().unwrap().animated = false;
+        let (pixels, animating) = draw(&mut renderer, frozen.clone(), 0., 1.);
+        assert!(!animating);
+        assert_eq!(pixels, draw(&mut renderer, frozen, 9., 1.).0);
+
+        sh.write_file(
+            dir.path().join("second.frag"),
+            include_str!("../../resources/shaders/focus-ring/pulse.frag"),
+        )
+        .unwrap();
+        let config = load();
+        shaders::set_decoration_programs(&mut renderer, &config);
+        assert_ne!(
+            draw(&mut renderer, second(&config), 0., 1.).0,
+            draw(&mut renderer, second(&config), 0.5, 1.).0,
+            "the second bundled shader must compile and animate too"
+        );
+    }
+
     #[test]
     fn egl_rainbow_ripple_pixels() {
         use smithay::backend::allocator::Fourcc;
