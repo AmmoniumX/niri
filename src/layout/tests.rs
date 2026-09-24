@@ -428,8 +428,8 @@ enum Op {
     AddNamedWorkspace {
         #[proptest(strategy = "1..=5usize")]
         ws_name: usize,
-        #[proptest(strategy = "prop::option::of(1..=5usize)")]
-        output_name: Option<usize>,
+        #[proptest(strategy = "proptest::collection::vec(1..=5usize, 0..=3)")]
+        output_names: Vec<usize>,
         #[proptest(strategy = "prop::option::of(arbitrary_layout_part().prop_map(Box::new))")]
         layout_config: Option<Box<niri_config::LayoutPart>>,
     },
@@ -860,13 +860,16 @@ impl Op {
             }
             Op::AddNamedWorkspace {
                 ws_name,
-                output_name,
+                output_names,
                 layout_config,
             } => {
                 layout.ensure_named_workspace(&WorkspaceConfig {
                     hidden: None,
                     name: WorkspaceName(format!("ws{ws_name}")),
-                    open_on_output: output_name.map(|name| format!("output{name}")),
+                    open_on_output: output_names
+                        .into_iter()
+                        .map(|name| format!("output{name}"))
+                        .collect(),
                     layout: layout_config.map(|x| niri_config::WorkspaceLayoutPart(*x)),
                 });
             }
@@ -1674,6 +1677,122 @@ fn check_ops(ops: impl IntoIterator<Item = Op>) -> Layout<TestWindow> {
     layout
 }
 
+fn workspace_output_name(layout: &Layout<TestWindow>, ws_name: usize) -> &str {
+    layout
+        .workspaces()
+        .find(|(_, _, workspace)| workspace.name() == Some(&format!("ws{ws_name}")))
+        .and_then(|(monitor, _, _)| monitor)
+        .unwrap()
+        .output_name()
+}
+
+#[test]
+fn workspace_output_fallback_promotes_preferred_in_reverse_connection_order() {
+    // output3 is not a candidate, so it stays the primary monitor throughout; every assertion
+    // below can only hold because of the candidate list.
+    let mut layout = Layout::default();
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::AddOutput(3),
+            Op::AddNamedWorkspace {
+                ws_name: 1,
+                output_names: vec![1, 2],
+                layout_config: None,
+            },
+        ],
+    );
+    assert_eq!(workspace_output_name(&layout, 1), "output3");
+
+    // The second candidate connects first; the workspace must leave the primary monitor.
+    check_ops_on_layout(&mut layout, [Op::AddOutput(2)]);
+    assert_eq!(workspace_output_name(&layout, 1), "output2");
+
+    // The first candidate connects last; it still wins.
+    check_ops_on_layout(&mut layout, [Op::AddOutput(1)]);
+    assert_eq!(workspace_output_name(&layout, 1), "output1");
+}
+
+#[test]
+fn workspace_output_preferred_removal_uses_fallback() {
+    let mut layout = Layout::default();
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::AddOutput(3),
+            Op::AddNamedWorkspace {
+                ws_name: 1,
+                output_names: vec![1, 2],
+                layout_config: None,
+            },
+            Op::AddOutput(1),
+            Op::AddOutput(2),
+        ],
+    );
+    assert_eq!(workspace_output_name(&layout, 1), "output1");
+
+    // The preferred candidate disconnects: the next candidate wins over the primary monitor.
+    check_ops_on_layout(&mut layout, [Op::RemoveOutput(1)]);
+    assert_eq!(workspace_output_name(&layout, 1), "output2");
+
+    // No candidate left: fall back to the primary monitor.
+    check_ops_on_layout(&mut layout, [Op::RemoveOutput(2)]);
+    assert_eq!(workspace_output_name(&layout, 1), "output3");
+}
+
+#[test]
+fn workspace_output_without_match_stays_on_default_output() {
+    let mut layout = Layout::default();
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::AddOutput(3),
+            Op::AddNamedWorkspace {
+                ws_name: 1,
+                output_names: vec![1, 2],
+                layout_config: None,
+            },
+        ],
+    );
+    assert_eq!(workspace_output_name(&layout, 1), "output3");
+
+    // An output that is not in the candidate list must not take the workspace.
+    check_ops_on_layout(&mut layout, [Op::AddOutput(4)]);
+    assert_eq!(workspace_output_name(&layout, 1), "output3");
+}
+
+#[test]
+fn explicit_workspace_move_overrides_output_candidates() {
+    let mut layout = Layout::default();
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::AddOutput(3),
+            Op::AddNamedWorkspace {
+                ws_name: 1,
+                output_names: vec![1, 2],
+                layout_config: None,
+            },
+            Op::AddOutput(2),
+        ],
+    );
+    assert_eq!(workspace_output_name(&layout, 1), "output2");
+
+    // After an explicit move, the candidate list no longer applies, even when the preferred
+    // candidate connects afterwards.
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::MoveWorkspaceToMonitor {
+                ws_name: Some(1),
+                output_id: 3,
+            },
+            Op::AddOutput(1),
+        ],
+    );
+    assert_eq!(workspace_output_name(&layout, 1), "output3");
+}
+
 #[track_caller]
 fn check_ops_with_options(
     options: Options,
@@ -1803,7 +1922,7 @@ fn move_window_to_hidden_workspace_with_empty_above_first() {
     check_ops([
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::UpdateConfig {
@@ -1837,7 +1956,7 @@ fn dnd_scroll_workspace_down_skips_hidden() {
         Op::AddOutput(5),
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::ToggleWorkspaceVisibility(1),
@@ -1858,7 +1977,7 @@ fn focus_after_column_move_unhides_workspace() {
     check_ops([
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -2011,7 +2130,7 @@ fn move_column_into_hidden_workspace() {
         },
         Op::AddNamedWorkspace {
             ws_name: 4,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -2029,7 +2148,7 @@ fn move_column_to_workspace_index_past_visible_end_stays_visible() {
     let layout = check_ops([
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -2049,7 +2168,7 @@ fn move_window_to_workspace_index_past_visible_end_stays_visible() {
     let layout = check_ops([
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -2091,7 +2210,7 @@ fn move_window_down_from_last_visible_workspace_stays_visible() {
     let layout = check_ops([
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -2118,7 +2237,7 @@ fn interactive_move_drop_below_workspaces_with_one_hidden() {
     check_ops([
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -2152,7 +2271,7 @@ fn move_window_to_output_into_hidden_workspace() {
     check_ops([
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(5),
@@ -2175,7 +2294,7 @@ fn move_window_into_hidden_workspace_then_move_workspace_down() {
     check_ops([
         Op::AddNamedWorkspace {
             ws_name: 2,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -2200,7 +2319,7 @@ fn move_last_visible_workspace_away_from_hidden_block() {
     check_ops([
         Op::AddNamedWorkspace {
             ws_name: 4,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -2229,7 +2348,7 @@ fn add_output_during_overview_gesture_with_hidden_workspace() {
         [
             Op::AddNamedWorkspace {
                 ws_name: 2,
-                output_name: None,
+                output_names: vec![],
                 layout_config: None,
             },
             Op::AddOutput(1),
@@ -2477,7 +2596,7 @@ fn move_workspace_down_stops_at_hidden_block() {
         Op::AddOutput(1),
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::ToggleWorkspaceVisibility(1),
@@ -3092,7 +3211,7 @@ fn operations_dont_panic() {
         Op::FocusOutput(2),
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: Some(1),
+            output_names: vec![1],
             layout_config: None,
         },
         Op::UnnameWorkspace { ws_name: 1 },
@@ -3247,7 +3366,7 @@ fn operations_from_starting_state_dont_panic() {
         Op::FocusOutput(2),
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: Some(1),
+            output_names: vec![1],
             layout_config: None,
         },
         Op::UnnameWorkspace { ws_name: 1 },
@@ -3792,12 +3911,12 @@ fn removing_all_outputs_preserves_empty_named_workspaces() {
         Op::AddOutput(1),
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddNamedWorkspace {
             ws_name: 2,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::RemoveOutput(1),
@@ -4160,7 +4279,7 @@ fn named_workspace_to_output() {
     let ops = [
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: None,
+            output_names: vec![],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -4176,7 +4295,7 @@ fn named_workspace_to_output_ewaf() {
     let ops = [
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: Some(2),
+            output_names: vec![2],
             layout_config: None,
         },
         Op::AddOutput(1),
@@ -4410,7 +4529,7 @@ fn interactive_move_from_workspace_with_layout_config() {
     let ops = [
         Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: Some(2),
+            output_names: vec![2],
             layout_config: Some(Box::new(niri_config::LayoutPart {
                 border: Some(niri_config::BorderRule {
                     on: true,
@@ -7265,7 +7384,7 @@ fn vertical_main_axis_output_and_workspace_overrides_reload_and_transfer() {
         &mut layout,
         [Op::AddNamedWorkspace {
             ws_name: 1,
-            output_name: Some(2),
+            output_names: vec![2],
             layout_config: Some(Box::new(vertical)),
         }],
     );
