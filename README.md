@@ -15,7 +15,7 @@
 > [!IMPORTANT]
 > **This is biri, a custom fork of [niri](https://github.com/niri-wm/niri).**
 >
-> It tracks upstream niri and adds a set of extra features on top: vertical scrolling for portrait outputs, GPU post-process shaders (global, per-region, and per-window), file-based animated focus-ring shaders, a consolidated multi-monitor carousel overview, dynamic overview zoom presets, isolated "signage" outputs, and runtime touchpad/DWT toggles.
+> It tracks upstream niri and adds a set of extra features on top: vertical scrolling for portrait outputs, GPU post-process shaders (global, per-region, and per-window), file-based animated focus-ring shaders, a consolidated multi-monitor carousel overview, dynamic overview zoom presets, isolated "signage" outputs, and a runtime DWT toggle.
 > See [Fork Features](#fork-features) below for the full list.
 >
 > Everything documented for upstream niri still applies. Bugs you hit here should be reported to this fork, not to upstream niri.
@@ -128,10 +128,9 @@ An `isolated` flag on an [output](./docs/wiki/Configuration:-Outputs.md#isolated
 
 ### Runtime input toggles
 
-- [`toggle-touchpad`](./docs/wiki/Configuration:-Key-Bindings.md#toggle-touchpad) — enable/disable the touchpad without editing the config.
-- [`toggle-dwt`](./docs/wiki/Configuration:-Key-Bindings.md#toggle-dwt) — same for disable-while-typing.
+[`toggle-dwt`](./docs/wiki/Configuration:-Key-Bindings.md#toggle-dwt) enables or disables disable-while-typing without editing the config. It composes with the config setting (config and toggle must agree), resets on restart, and applies to newly hot-plugged touchpads.
 
-Both compose with the config settings (config and toggle must agree), reset on restart, and apply to newly hot-plugged touchpads.
+The [`toggle-touchpad`](./docs/wiki/Configuration:-Key-Bindings.md#toggle-touchpad) action originally carried here is now part of upstream niri ([#3316](https://github.com/niri-wm/niri/pull/3316)), including its `TouchpadToggled` IPC event and default `XF86TouchpadToggle` binding.
 
 ### Fast-tracked upstream PRs
 
@@ -244,6 +243,12 @@ We talk about niri development and history, and my experience building and maint
 [A tour of the niri scrolling-tiling Wayland compositor](https://lwn.net/Articles/1025866/) · *July 2025*
 
 An LWN article with a nice overview and introduction to niri.
+
+[How to test a Wayland compositor?](https://youtu.be/w44fYK5z418?list=PLK4NE4dSsLlw) · *October 2026*
+
+My talk about some testing techniques used in niri: property-based tests, snapshot tests, client-server tests.
+The first half overlaps with my RustCon talk, the second half is new.
+The talk is in Russian, but I prepared full English subtitles that you can find in YouTube's subtitle language selector.
 
 ## Contributing
 

@@ -66,7 +66,11 @@ pub struct Headless {
 impl Headless {
     pub fn new(event_loop: LoopHandle<'static, State>) -> Self {
         let udev_seat = std::env::var("XDG_SEAT").unwrap_or_else(|_| "seat0".to_owned());
-        init_headless_libinput(event_loop, &udev_seat);
+        // Tests supply synthetic input. Reading the host's keyboards would make keymap,
+        // focus, and gesture assertions depend on activity outside the test fixture.
+        if !cfg!(test) {
+            init_headless_libinput(event_loop, &udev_seat);
+        }
 
         Self {
             renderer: None,

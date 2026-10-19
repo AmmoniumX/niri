@@ -18,6 +18,8 @@ use smithay::reexports::wayland_protocols::wp::viewporter::client::wp_viewporter
 use smithay::reexports::wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
 use smithay::reexports::wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use smithay::reexports::wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
+use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
+use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::{
     self, ZwlrLayerShellV1,
 };
@@ -61,6 +63,7 @@ pub struct State {
     pub compositor: Option<WlCompositor>,
     pub xdg_wm_base: Option<XdgWmBase>,
     pub layer_shell: Option<ZwlrLayerShellV1>,
+    pub virtual_keyboard_manager: Option<ZwpVirtualKeyboardManagerV1>,
     pub virtual_pointer_manager: Option<ZwlrVirtualPointerManagerV1>,
     pub spbm: Option<WpSinglePixelBufferManagerV1>,
     pub viewporter: Option<WpViewporter>,
@@ -261,6 +264,7 @@ impl Client {
             compositor: None,
             xdg_wm_base: None,
             layer_shell: None,
+            virtual_keyboard_manager: None,
             virtual_pointer_manager: None,
             spbm: None,
             viewporter: None,
@@ -631,6 +635,9 @@ impl Dispatch<WlRegistry, ()> for State {
                 } else if interface == ZwlrLayerShellV1::interface().name {
                     let version = min(version, ZwlrLayerShellV1::interface().version);
                     state.layer_shell = Some(registry.bind(name, version, qh, ()));
+                } else if interface == ZwpVirtualKeyboardManagerV1::interface().name {
+                    let version = min(version, ZwpVirtualKeyboardManagerV1::interface().version);
+                    state.virtual_keyboard_manager = Some(registry.bind(name, version, qh, ()));
                 } else if interface == ZwlrVirtualPointerManagerV1::interface().name {
                     let version = min(version, ZwlrVirtualPointerManagerV1::interface().version);
                     state.virtual_pointer_manager = Some(registry.bind(name, version, qh, ()));
@@ -1042,3 +1049,6 @@ impl Dispatch<ZwpKeyboardShortcutsInhibitorV1, ()> for State {
         }
     }
 }
+
+wayland_client::delegate_noop!(State: ignore ZwpVirtualKeyboardManagerV1);
+wayland_client::delegate_noop!(State: ignore ZwpVirtualKeyboardV1);

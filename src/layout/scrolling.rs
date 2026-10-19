@@ -3023,8 +3023,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             .map(|rect| self.map_rect_out(rect))
     }
 
-    pub fn popup_target_rect(&self, id: &W::Id) -> Option<Rectangle<f64, Logical>> {
-        for col in &self.columns {
+    pub fn popup_target_rect(&self, id: &W::Id, overflow: bool) -> Option<Rectangle<f64, Logical>> {
+        let view_pos = self.target_view_pos();
+        let column_mains = self.column_main_positions(self.data.iter().copied());
+        for (col, column_main) in zip(&self.columns, column_mains) {
             for (tile, pos) in col.tiles() {
                 if tile.window().id() == id {
                     // In the scrolling layout, we try to position popups horizontally within the
@@ -3032,15 +3034,27 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     // the left/right edge of the screen), and vertically within the whole parent
                     // working area.
                     let axis = self.axis();
-                    let window_size = axis.size_out(tile.window_size());
-                    let window_loc = axis.point_out(tile.window_loc());
-                    let width = window_size.w;
-                    let height = self.parent_area.size.h;
+                    let window_loc = axis.point_in(tile.window_loc());
+                    let target = if overflow {
+                        // For IME popups, this is a bit of an unexpected behavior though; people
+                        // are used to them extending to the right. Also, IME popups disappear when
+                        // keyboard focus changes, so changing scroll position is not a problem. So,
+                        // constrain them to the parent area instead.
+                        let mut target = self.parent_area;
+                        target.loc.x -= column_main - view_pos;
+                        target.loc -= pos;
+                        target.loc -= window_loc;
+                        target
+                    } else {
+                        let width = axis.size_in(tile.window_size()).w;
+                        let height = self.parent_area.size.h;
 
-                    let mut target = Rectangle::from_size(Size::from((width, height)));
-                    target.loc.y += self.parent_area.loc.y;
-                    target.loc.y -= pos.y;
-                    target.loc.y -= window_loc.y;
+                        let mut target = Rectangle::from_size(Size::from((width, height)));
+                        target.loc.y += self.parent_area.loc.y;
+                        target.loc.y -= pos.y;
+                        target.loc.y -= window_loc.y;
+                        target
+                    };
 
                     return Some(self.map_rect_out(target));
                 }
@@ -3354,19 +3368,22 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         true
     }
 
-    pub fn render_above_top_layer(&self) -> bool {
+    pub fn fullscreen_window_above_top_layer(&self) -> Option<&W> {
         // Render above the top layer if we're on a fullscreen window and the view is stationary.
         if self.columns.is_empty() {
-            return false;
+            return None;
         }
 
         if !self.view_offset.is_static() {
-            return false;
+            return None;
         }
 
-        self.columns[self.active_column_idx]
-            .sizing_mode()
-            .is_fullscreen()
+        let col = &self.columns[self.active_column_idx];
+        if !col.sizing_mode().is_fullscreen() {
+            return None;
+        }
+
+        Some(col.tiles[col.active_tile_idx].window())
     }
 
     pub fn render<R: NiriRenderer>(

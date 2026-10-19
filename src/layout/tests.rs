@@ -7740,3 +7740,53 @@ fn egl_decoration_light_precedes_floating_and_tiled_content() {
         );
     }
 }
+
+#[test]
+fn popup_overflow_uses_output_bounds_on_both_axes() {
+    for main_axis in [MainAxis::Horizontal, MainAxis::Vertical] {
+        let mut options = Options::default();
+        options.layout.main_axis = main_axis;
+        let mut layout = check_ops_with_options(
+            options,
+            [
+                Op::AddOutput(1),
+                Op::AddWindow {
+                    params: TestWindowParams::new(1),
+                },
+                Op::AddWindow {
+                    params: TestWindowParams::new(2),
+                },
+            ],
+        );
+        layout.clock.set_complete_instantly(true);
+        layout.advance_animations();
+        let ws = layout.active_workspace().unwrap();
+        for (tile, position, _) in ws.tiles_with_render_positions() {
+            let id = tile.window().id();
+            let window_origin = position + tile.window_loc();
+            let overflow = layout.popup_target_rect(id, true);
+            assert_eq!(overflow.size, Size::from((1280., 720.)), "{main_axis:?}");
+            assert_eq!(
+                overflow.loc + window_origin,
+                Point::from((0., 0.)),
+                "{main_axis:?}"
+            );
+
+            let regular = layout.popup_target_rect(id, false);
+            match main_axis {
+                MainAxis::Horizontal => {
+                    assert_eq!(regular.size.w, tile.window_size().w);
+                    assert_eq!(regular.size.h, 720.);
+                    assert_eq!(regular.loc.x, 0.);
+                    assert_eq!(regular.loc.y + window_origin.y, 0.);
+                }
+                MainAxis::Vertical => {
+                    assert_eq!(regular.size.w, 1280.);
+                    assert_eq!(regular.size.h, tile.window_size().h);
+                    assert_eq!(regular.loc.x + window_origin.x, 0.);
+                    assert_eq!(regular.loc.y, 0.);
+                }
+            }
+        }
+    }
+}
